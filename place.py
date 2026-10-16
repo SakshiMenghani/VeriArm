@@ -73,7 +73,7 @@ async def test_pick(machine: RobotClient) -> None:
     await asyncio.sleep(SETTLE_S)
     await move_tip(machine, tip_target(box_center, APPROACH_MM), "back off", straight_line=True)
     await go_to_overview(machine)
-    print("[test] pick test OK: the suction holds and the holding sensor works")
+    print("[test] pick test OK: the box came up with the gripper (camera check)")
 
 
 async def test_lift(machine: RobotClient, lift_mm: float = 20.0) -> None:
@@ -87,12 +87,15 @@ async def test_lift(machine: RobotClient, lift_mm: float = 20.0) -> None:
     await move_tip(machine, contact, "lower onto the box top", straight_line=True)
     print("[lift] suction ON:", await gripper.grab())
     await asyncio.sleep(2)
-    print("[lift] sensor before lift:", (await gripper.is_holding_something()).is_holding_something)
+    from grip_check import judge, wrist_photo
+    before = await wrist_photo(machine)
     await move_tip(machine, tip_target(box_center, -find_pick.PRESS_MM + lift_mm), f"lift {lift_mm:.0f} mm",
                    straight_line=True)
     print(f"[lift] lifted {lift_mm:.0f} mm -- is the box off the table?")
     await asyncio.sleep(3)
-    print("[lift] sensor while lifted:", (await gripper.is_holding_something()).is_holding_something)
+    held, score = judge(before, await wrist_photo(machine), "lift_test")
+    print(f"[lift] camera grip check: similarity {score:.2f} -> {'HELD' if held else 'NOT held'} "
+          "(captures/lift_test.jpg)")
     await move_tip(machine, contact, "lower back", straight_line=True)
     await gripper.open()
     await asyncio.sleep(SETTLE_S)

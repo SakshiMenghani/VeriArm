@@ -45,7 +45,7 @@ SUCTION_Z_CORRECTION_MM = 17.0  # default, for box heights not measured below
 #   large (61 mm): real gap 35 mm vs 30 -> tip 5 mm too high with 17 -> 12   (Oct 16, Sakshi)
 #   tall (140 mm): real gap 45 mm vs 50 -> tip 5 mm too low  with 17 -> 22   (Oct 16, Sandy)
 # Keyed by box height: box_center.z = table top + known box height (box_center_from).
-SUCTION_Z_CORRECTION_BY_HEIGHT = {61.0: 12.0, 140.0: 22.0}
+SUCTION_Z_CORRECTION_BY_HEIGHT = {61.0: 12.0, 82.0: 15.0, 140.0: 22.0, 179.0: 27.0}  # 82, 179: estimated, not measured
 
 
 def suction_correction(box_top_z: float) -> float:
@@ -57,8 +57,13 @@ def suction_correction(box_top_z: float) -> float:
     return SUCTION_Z_CORRECTION_MM
 
 APPROACH_MM = 50.0  # hover height above the box top before descending
-PRESS_MM = 10.0     # press 10 mm past the top surface
+PRESS_MM = 15.0     # press 15 mm past the top surface
 LIFT_MM = 80.0      # how far to lift after grabbing
+GRIP_SETTLE_S = 2.0 # wait after suction on before lifting
+GRIP_CHECK_BLOCKS = False  # camera grip check only warns for now: it misjudges plain cardboard
+GENTLE_LIFT_MM = 30.0   # lift the first part slowly, in small steps, so the seal holds as the weight comes on
+GENTLE_STEP_MM = 5.0
+GENTLE_PAUSE_S = 0.4
 
 ASK_BEFORE_MOVING = True
 
@@ -153,11 +158,46 @@ class PickFailedError(RuntimeError):
     """The suction didn't hold the box. Suction is off and the tip has backed away."""
 
 
+LABEL_MAX_OFFSET_MM = 60.0  # aim at the label only if it's within this of the box center (cup stays on the top)
+
+
+async def grip_point(machine: RobotClient, box_center: Pose) -> Pose:
+    """Where to put the suction cup: on the QR label if it's on the box top (smooth paper/tape seals;
+    bare corrugated cardboard leaks), else the box center. Needs the arm at overview-blue (uses that
+    photo); anywhere else it just returns box_center."""
+    import cv2
+    import numpy as np
+    from detect import NotAtViewError, pixel_to_table
+    try:
+        bgr, _ = await live_images(machine)
+    except NotAtViewError:
+        return box_center
+    ok, pts = cv2.QRCodeDetectorAruco().detectMulti(bgr)
+    if not ok:
+        print("[pick] no label visible on the top: aiming at the box center")
+        return box_center
+    view = get_pose(OVERVIEW)
+    best = None
+    for quad in pts:
+        u, v = quad.mean(axis=0)
+        x, y = pixel_to_table(u, v, view, box_center.z)  # the label lies on the box top
+        d = float(np.hypot(x - box_center.x, y - box_center.y))
+        if best is None or d < best[2]:
+            best = (x, y, d)
+    x, y, d = best
+    if d > LABEL_MAX_OFFSET_MM:  # too close to the edge: move toward it, but keep the cup on the top
+        k = LABEL_MAX_OFFSET_MM / d
+        x, y = box_center.x + (x - box_center.x) * k, box_center.y + (y - box_center.y) * k
+    print(f"[pick] aiming at the label: x={x:.1f} y={y:.1f} ({d:.0f} mm from the box center)")
+    return Pose(x=x, y=y, z=box_center.z, o_x=0, o_y=0, o_z=1, theta=box_center.theta)
+
+
 async def pick_box(machine: RobotClient, box_center: Pose) -> None:
-    """Approach the box top, engage vacuum, check the grip, and lift it.
-    Raises PickFailedError (suction off, tip backed up above the box) if the gripper isn't holding it,
-    instead of lifting nothing and carrying it to a zone."""
+    """Approach the box top, engage vacuum, lift it, and confirm the grip with the wrist camera.
+    Raises PickFailedError (suction off, tip LIFT_MM above the box) if the box didn't come up,
+    instead of carrying nothing to a zone."""
     gripper = Gripper.from_robot(machine, GRIPPER)
+    box_center = await grip_point(machine, box_center)  # on the label if there is one on the top
     confirm("open the vacuum gripper (turn suction OFF)")
     await gripper.open()
     await move_tip(machine, tip_target(box_center, APPROACH_MM), "approach above the box")
@@ -165,19 +205,27 @@ async def pick_box(machine: RobotClient, box_center: Pose) -> None:
     confirm("turn suction ON")
     grabbed = await gripper.grab()
     print("grab() returned:", grabbed)
-    await asyncio.sleep(2)
-    status = await gripper.is_holding_something()
-    print("Holding an object:", status.is_holding_something)
-    if not status.is_holding_something:
-        await gripper.open()
-        await move_tip(machine, tip_target(box_center, APPROACH_MM), "back off (no grip)", straight_line=True)
-        raise PickFailedError("suction didn't hold the box (is the top flat and clean? is the tip on the box?)")
+    await asyncio.sleep(GRIP_SETTLE_S)  # let the vacuum build
+    # Grip check with the wrist camera (is_holding_something is not reliable on this vacuum gripper):
+    # photo at the box top, lift straight up, photo again. Held -> the box rose with the camera.
+    from grip_check import judge, wrist_photo
+    before = await wrist_photo(machine)
+    h = -PRESS_MM
+    while h < GENTLE_LIFT_MM - PRESS_MM:  # slow start: small steps with pauses
+        h = min(h + GENTLE_STEP_MM, GENTLE_LIFT_MM - PRESS_MM)
+        await move_tip(machine, tip_target(box_center, h), f"lift slowly ({h + PRESS_MM:.0f} mm)", straight_line=True)
+        await asyncio.sleep(GENTLE_PAUSE_S)
     await move_tip(machine, tip_target(box_center, LIFT_MM), "lift the box", straight_line=True)
-    status = await gripper.is_holding_something()
-    print("Holding something after lift:", status.is_holding_something)
-    if not status.is_holding_something:
+    held, score = judge(before, await wrist_photo(machine))
+    print(f"Grip check (camera): score {score:.2f} -> {'HELD' if held else 'NOT held'}  (captures/grip.jpg)")
+    if not held and not GRIP_CHECK_BLOCKS:
+        print("[pick] WARNING: camera check says not held; continuing anyway (GRIP_CHECK_BLOCKS = False)")
+    if not held and GRIP_CHECK_BLOCKS:
+        # put it back down first: if the check is wrong and the box IS held, it mustn't drop from a height
+        await move_tip(machine, tip_target(box_center, 10.0), "lower back before letting go", straight_line=True)
         await gripper.open()
-        raise PickFailedError("lost the box while lifting")
+        raise PickFailedError(f"the box didn't come up with the gripper (camera similarity {score:.2f}); "
+                              "is there a smooth patch in the middle of the box top?")
 
 
 async def release(machine: RobotClient) -> None:
