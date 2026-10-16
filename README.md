@@ -34,8 +34,8 @@ VIAM_API_KEY_ID=...
 - `check_frames.py`: read-only frame system report (what each part is attached to, offsets, obstacles, where the camera and suction tip are now)
 - `record_pose.py <name>`: save where the arm is now as a named pose in `poses.json` (read-only; refuses if the arm is moving). `--list` shows saved poses, `--force` overwrites.
 - `poses.py`: load saved poses in code, e.g. `get_pose("v_place")["joints"]` or `dict_to_pose(get_pose("v_place")["tip_world"])`
-- `find_pick.py`: `find_box()` / `pick_box()` (Sandy). `find_box()` detects the blue zone center from a live photo each run, falling back to the saved `tape_spot`. `python find_pick.py plan` prints targets without the robot; `find`, `hover`, `pick`, `release` move it and ask before each motion.
-- `detect.py`: find the blue zone in a photo and convert pixels to table positions (needs a pose recorded with camera data, e.g. `overview-blue`). `python detect.py` takes a live photo (arm at `overview-blue`) and saves the zone center as `tape_spot`; `--no-save` just prints; `--reference` runs offline on `reference/overview-blue.jpg`. Refuses to save if the zone is partly covered (size check).
+- `find_pick.py`: `find_box()` / `pick_box()` (Sandy). `find_box()` takes a live photo from `overview-blue` and finds the box anywhere in the blue zone; raises `ZoneBlockedError` / `NoBoxError` instead of guessing. `python find_pick.py plan` prints targets without the robot; `find`, `hover`, `pick`, `release` move it and ask before each motion.
+- `detect.py`: find the blue zone and the box in it (size + depth checks), and convert pixels to table positions. `python detect.py` takes a live photo (arm at `overview-blue`) and saves the zone center as `tape_spot`; `--no-save` just prints; `--reference` / `--image PATH` run offline; `--save-photo NAME` keeps the photo in `reference/`.
 
 ## Machine resources
 

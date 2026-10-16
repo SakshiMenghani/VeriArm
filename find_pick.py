@@ -1,7 +1,7 @@
 """Sandy: find the box in the blue zone and pick it up with suction.
 
-MVP: box_center is the blue zone center, detected from a live overview photo each run
-(falls back to the saved "tape_spot"). Later: find_box() detects the box itself.
+find_box() takes a live photo from overview-blue and finds the box anywhere in the blue zone.
+If the zone is blocked or there's no box, it raises an error instead of guessing.
 
 Every motion asks for confirmation unless --yes is passed. Keep someone at the e-stop.
 
@@ -23,7 +23,7 @@ from viam.proto.service.motion import Constraints, LinearConstraint
 from viam.robot.client import RobotClient
 from viam.services.motion import MotionClient
 
-from detect import detect_blue_center
+from detect import detect_box
 from poses import get_pose
 from robot import ARM, GRIPPER, MOTION, connect
 
@@ -80,16 +80,10 @@ async def find_box(machine: RobotClient) -> Pose:
     # needs the camera exactly where it was when the pose was recorded.
     confirm(f"move to {OVERVIEW} (joint move)")
     await Arm.from_robot(machine, ARM).move_to_joint_positions(JointPositions(values=get_pose(OVERVIEW)["joints"]))
-    spot = get_pose("tape_spot")["tip_world"]
-    # MVP: the box sits at the blue zone center, measured from a live photo each run.
-    # Later: detect the box itself instead of the zone.
-    try:
-        x, y = await detect_blue_center(machine)
-        print(f"Live detection: blue zone center x={x:.1f} y={y:.1f}")
-    except (LookupError, RuntimeError) as e:
-        x, y = spot["x"], spot["y"]
-        print(f"Live detection failed ({e}); using saved tape_spot x={x:.1f} y={y:.1f}")
-    return Pose(x=x, y=y, z=TABLE_TOP_Z, o_x=0, o_y=0, o_z=1, theta=spot["theta"])
+    box = await detect_box(machine)  # raises ZoneBlockedError / NoBoxError: don't guess, let the caller decide
+    print(f"Box found: x={box.x:.1f} y={box.y:.1f}, {box.length_mm:.0f} x {box.width_mm:.0f} mm, yaw {box.yaw_deg:.0f} deg")
+    theta = get_pose(OVERVIEW)["tip_world"]["theta"]
+    return Pose(x=box.x, y=box.y, z=TABLE_TOP_Z, o_x=0, o_y=0, o_z=1, theta=theta)
 
 
 async def hover_over_box(machine: RobotClient, box_center: Pose) -> None:
@@ -138,7 +132,10 @@ async def main():
         if args.action == "release":
             await release(machine)
             return
-        box_center = await find_box(machine)
+        try:
+            box_center = await find_box(machine)
+        except LookupError as e:  # ZoneBlockedError or NoBoxError
+            raise SystemExit(f"Not moving: {e}")
         print(f"box_center: x={box_center.x:.1f} y={box_center.y:.1f} z={box_center.z:.1f}")
         if args.action == "hover":
             await hover_over_box(machine, box_center)
