@@ -89,7 +89,7 @@ Measured on Oct 16 with the real box: top and three sides are reachable at the f
 
 ## Scan result: handoff to pick / place (Sakshi → Sandy, Yixin)
 
-`result = await scan(machine)` in `scan.py` (find → inspect the 5 visible faces → verify). Also saved as `runs/last_result.json`. `None` = no box in the blue zone.
+`result = await scan(machine)` in `scan.py` (find → inspect the 5 visible faces → verify). Also saved as `runs/last_result.json` on the machine that ran it (`runs/` is not in git: it's per-run output with photos). Committed examples of the format: `examples/scan_result_accepted.json`, `examples/scan_result_rejected.json`. `None` = no box in the blue zone.
 
 ```python
 result = await scan(machine)
