@@ -15,14 +15,18 @@ Usage:
 import argparse
 import asyncio
 
+from viam.components.arm import Arm
 from viam.components.gripper import Gripper
+from viam.proto.component.arm import JointPositions
 from viam.proto.common import Pose, PoseInFrame
 from viam.proto.service.motion import Constraints, LinearConstraint
 from viam.robot.client import RobotClient
 from viam.services.motion import MotionClient
 
-from poses import dict_to_pose, get_pose
-from robot import GRIPPER, MOTION, connect
+from poses import get_pose
+from robot import ARM, GRIPPER, MOTION, connect
+
+OVERVIEW = "overview-blue"
 
 # Box is a fixed size (mm).
 BOX_L, BOX_W, BOX_H = 107.0, 67.0, 24.0
@@ -70,7 +74,11 @@ async def move_tip(machine: RobotClient, target: Pose, what: str, straight_line:
 
 async def find_box(machine: RobotClient) -> Pose:
     """Move to overview and return box_center: x, y of the box, z = table top (box bottom), mm, world frame."""
-    await move_tip(machine, dict_to_pose(get_pose("overview")["tip_world"]), "move to overview")
+    # Use the saved joint angles, not the tip pose: the planner can reach the same tip pose
+    # with a different arm posture (we saw it pick one at a joint limit), and detection
+    # needs the camera exactly where it was when the pose was recorded.
+    confirm(f"move to {OVERVIEW} (joint move)")
+    await Arm.from_robot(machine, ARM).move_to_joint_positions(JointPositions(values=get_pose(OVERVIEW)["joints"]))
     spot = get_pose("tape_spot")["tip_world"]
     return Pose(x=spot["x"], y=spot["y"], z=TABLE_TOP_Z, o_x=0, o_y=0, o_z=1, theta=spot["theta"])
 
