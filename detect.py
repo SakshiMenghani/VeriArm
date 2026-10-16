@@ -113,7 +113,7 @@ def save_tape_spot(x: float, y: float) -> None:
         "joints": None,
         "tip_world": {"x": round(x, 3), "y": round(y, 3), "z": TABLE_TOP_Z,
                       "o_x": 0.0, "o_y": 0.0, "o_z": -1.0, "theta": view["tip_world"]["theta"]},
-        "source": f"blue zone center computed from a {VIEW} photo",
+        "source": f"blue zone center computed from a photo at {VIEW}",
         "recorded_at": datetime.now().isoformat(timespec="seconds"),
     })
 
