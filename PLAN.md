@@ -53,7 +53,7 @@ Measured on Oct 16 with the real box: top and three sides are reachable at the f
 - `python find_pick.py find`: find the box from the terminal (`--no-move` to stay put, `--image` for a saved photo). Opens a picture of the detection.
 - Shared setup: frame system check, 17 mm tip offset, saved poses, `blue_zone`. **Done.**
 - **Test:** hover the gripper over the point `find_box` returns and check it's within a couple of cm of the real center. **Passed** (blue zone center).
-- Todo: test detection with the box off-center and rotated.
+- **Detection tests passed (live):** centered, shifted to a corner (hanging ~3 cm over an edge), rotated ~36° (yaw 57°) with corners over three edges, and hanging ~10 cm off the zone, which is correctly **refused** (`NoBoxError`, no position). Photos + depth in `reference/box-*.jpg/.npy` for offline re-tests: `python find_pick.py find --image reference/box-rotated.jpg`.
 
 ### Sakshi — inspect the box, labels, verification
 - `inspect_box(machine, box_center) -> str | None` in `inspection.py`: photograph the 5 visible faces (top, then the sides going around the box), decode QR, stop at the first valid VeriArm label, return the raw label text. Gets the box's size/yaw from `detect.detect_box`. Every image + a report goes to `runs/inspect_<time>/` and `runs/last_inspection.json`.
