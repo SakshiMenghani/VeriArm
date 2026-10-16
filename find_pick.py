@@ -31,8 +31,8 @@ from robot import ARM, GRIPPER, MOTION, connect
 
 OVERVIEW = "overview-blue"
 
-# The box we demo with (detect.KNOWN_BOXES). TODO when we use several sizes: take the
-# height from the detection instead of this constant.
+# The box we demo with (detect.KNOWN_BOXES). find_box() uses the height of whichever
+# known box it detects; this is only for the offline `plan` printout.
 BOX_L, BOX_W, BOX_H = KNOWN_BOXES["large"]
 
 # The real suction tip is ~17 mm lower than the config thinks (measured twice by hand,
@@ -52,11 +52,11 @@ def confirm(what: str) -> None:
 
 
 def tip_target(box_center: Pose, height_above_top: float) -> Pose:
-    """Suction tip pointing straight down, `height_above_top` mm above the real box top."""
+    """Suction tip pointing straight down, `height_above_top` mm above the real box top (box_center.z)."""
     return Pose(
         x=box_center.x,
         y=box_center.y,
-        z=box_center.z + BOX_H + height_above_top + SUCTION_Z_CORRECTION_MM,
+        z=box_center.z + height_above_top + SUCTION_Z_CORRECTION_MM,
         o_x=0, o_y=0, o_z=-1,
         theta=box_center.theta,
     )
@@ -73,8 +73,15 @@ async def move_tip(machine: RobotClient, target: Pose, what: str, straight_line:
     )
 
 
+def box_center_from(box: BoxDetection) -> Pose:
+    """box_center for a detection: x, y = box center, z = TOP of the box (table top + known box height)."""
+    theta = get_pose(OVERVIEW)["tip_world"]["theta"]
+    top_z = TABLE_TOP_Z + KNOWN_BOXES[box.name][2]  # known height: the depth measurement runs ~5 mm low
+    return Pose(x=box.x, y=box.y, z=top_z, o_x=0, o_y=0, o_z=1, theta=theta)
+
+
 async def find_box(machine: RobotClient) -> Pose:
-    """Move to overview and return box_center: x, y of the box, z = table top (box bottom), mm, world frame."""
+    """Move to overview and return box_center: x, y = center of the box, z = TOP of the box. mm, world frame."""
     # Use the saved joint angles, not the tip pose: the planner can reach the same tip pose
     # with a different arm posture (we saw it pick one at a joint limit), and detection
     # needs the camera exactly where it was when the pose was recorded.
@@ -82,8 +89,7 @@ async def find_box(machine: RobotClient) -> Pose:
     await Arm.from_robot(machine, ARM).move_to_joint_positions(JointPositions(values=get_pose(OVERVIEW)["joints"]))
     box = await detect_box(machine)  # raises ZoneBlockedError / NoBoxError: don't guess, let the caller decide
     print(f"Box found: x={box.x:.1f} y={box.y:.1f}, {box.length_mm:.0f} x {box.width_mm:.0f} mm, yaw {box.yaw_deg:.0f} deg")
-    theta = get_pose(OVERVIEW)["tip_world"]["theta"]
-    return Pose(x=box.x, y=box.y, z=TABLE_TOP_Z, o_x=0, o_y=0, o_z=1, theta=theta)
+    return box_center_from(box)
 
 
 async def hover_over_box(machine: RobotClient, box_center: Pose) -> None:
@@ -111,8 +117,9 @@ def print_locate(box: BoxDetection) -> None:
     """Print where the box is (no grip decisions: that's pick_box's job)."""
     print(f"Box '{box.name}': {box.length_mm:.0f} x {box.width_mm:.0f} x {box.height_mm:.0f} mm (measured), "
           f"yaw {box.yaw_deg:.0f} deg")
-    print(f"  box_center (world mm):  x={box.x:.1f}  y={box.y:.1f}  z={TABLE_TOP_Z:.1f}  (z = table top)")
-    print(f"  box top surface:        z={TABLE_TOP_Z + BOX_H:.1f}  (table top + {BOX_H:.0f} mm box height)")
+    c = box_center_from(box)
+    print(f"  box_center (world mm):  x={c.x:.1f}  y={c.y:.1f}  z={c.z:.1f}  "
+          f"(z = top of the box: table {TABLE_TOP_Z:.0f} + {KNOWN_BOXES[box.name][2]:.0f} mm box height)")
 
 
 async def locate(machine: RobotClient) -> None:
@@ -123,10 +130,10 @@ async def locate(machine: RobotClient) -> None:
 def print_plan() -> None:
     zone = get_pose("blue_zone")["center_world"]
     theta = get_pose(OVERVIEW)["tip_world"]["theta"]
-    box_center = Pose(x=zone["x"], y=zone["y"], z=TABLE_TOP_Z, theta=theta)
+    box_center = Pose(x=zone["x"], y=zone["y"], z=TABLE_TOP_Z + BOX_H, theta=theta)
     print(f"Example: box at the blue zone center x={box_center.x:.1f} y={box_center.y:.1f}, "
           f"box {BOX_L:.0f} x {BOX_W:.0f} x {BOX_H:.0f} mm")
-    print(f"box top (real): z={TABLE_TOP_Z + BOX_H:.1f}")
+    print(f"box_center.z = box top (real): z={box_center.z:.1f}")
     for label, h in (("approach", APPROACH_MM), ("contact", -PRESS_MM), ("lift", LIFT_MM)):
         t = tip_target(box_center, h)
         print(f"  {label:9s} commanded tip z={t.z:6.1f}  (real tip ~{h:+.0f} mm vs box top)")

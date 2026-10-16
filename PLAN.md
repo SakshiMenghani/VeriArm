@@ -38,9 +38,9 @@ The camera is on the arm, so converting a pixel to a table position only works i
 Because the box size is fixed, the inspection poses are constant offsets from the box center:
 
 ```
-top   = center + (0, 0, box_h + ~20cm), camera facing down
-front = center + (-~25cm, 0, box_h/2), camera facing +x
-back  = center + (+~25cm, 0, box_h/2), camera facing -x
+top   = center + (0, 0, ~20cm), camera facing down        (center.z is the box TOP)
+front = center + (-~25cm, 0, -box_h/2), camera facing +x
+back  = center + (+~25cm, 0, -box_h/2), camera facing -x
 left / right = same idea on y
 ```
 
@@ -61,7 +61,7 @@ The code always computes poses as `box_center + offset`. For the first version, 
 - **Test:** put the box in the blue zone, get `box_center` from `find_box` (or `python find_pick.py locate`), run `inspect_box`.
 
 ### Yixin — pick, sort the box, and notify
-- `pick_box(machine, box_center)`: work out the grip point, lower onto the top, turn on suction, lift. Starting point: the untested draft in `find_pick.py`. Inputs: `box_center` (x, y; z = table top), box height 61 mm, tip 17 mm lower than the config thinks, move the tip with the motion service (gripper as the component).
+- `pick_box(machine, box_center)`: work out the grip point, lower onto the top, turn on suction, lift. Starting point: the untested draft in `find_pick.py`. Inputs: `box_center` (x, y = box center; **z = top of the box**, so aim the suction cup at `box_center.z` directly), tip 17 mm lower than the config thinks, move the tip with the motion service (gripper as the component).
 - `place_box(verified: bool)`: carry the picked box to V or R, lower it, release suction, return to a safe pose.
 - `notify_done(result)`: send the "done" notification.
 - **Test:** jog the arm, pick a box with a manual suction command, test both drops and the notification.
@@ -72,7 +72,7 @@ The code always computes poses as `box_center + offset`. For the first version, 
 
 ## Interfaces (agree on these first)
 
-- `box_center`: a `Pose` in **mm**, in the **arm's base frame** (same as Viam's world frame). x, y = center of the box's footprint; **z = table top, i.e. the box's bottom** (−23 mm). The box top is `box_center.z + 61`.
+- `box_center`: a `Pose` in **mm**, in the **arm's base frame** (same as Viam's world frame). x, y = center of the box; **z = the TOP of the box** (table top −23 + the detected box's known height; +38 mm for the current box). The table top is always z = −23. *(Changed Oct 16: z used to be the table top. If you wrote `box_center.z + 61`, drop the `+ 61`.)*
 - Function signatures:
 
   ```python
