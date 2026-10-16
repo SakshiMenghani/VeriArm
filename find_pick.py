@@ -12,7 +12,7 @@ Usage:
     python find_pick.py find --image reference/box-center.jpg   # offline, from a saved photo (no robot)
     python find_pick.py plan      # print the pick targets, no connection to the robot
     python find_pick.py hover     # put the suction tip 50 mm above the box top (hover test)
-    python find_pick.py pick      # pick the box (Yixin's, untested draft): approach, lower, suction on, lift
+    python find_pick.py pick      # open suction, approach, lower, grab, verify, lift
     python find_pick.py release   # turn suction off
 """
 import argparse
@@ -41,7 +41,7 @@ BOX_L, BOX_W, BOX_H = KNOWN_BOXES["large"]
 SUCTION_Z_CORRECTION_MM = 17.0
 
 APPROACH_MM = 50.0  # hover height above the box top before descending
-PRESS_MM = 2.0      # go slightly past the top surface so the cup seals
+PRESS_MM = 10.0     # press 10 mm past the top surface
 LIFT_MM = 80.0      # how far to lift after grabbing
 
 ASK_BEFORE_MOVING = True
@@ -91,7 +91,6 @@ async def find_box(machine: RobotClient, move: bool = True) -> Pose:
         # Use the saved joint angles, not the tip pose: the planner can reach the same tip pose
         # with a different arm posture (we saw it pick one at a joint limit), and detection
         # needs the camera exactly where it was when the pose was recorded.
-        confirm(f"move to {OVERVIEW} (joint move)")
         await Arm.from_robot(machine, ARM).move_to_joint_positions(JointPositions(values=get_pose(OVERVIEW)["joints"]))
     bgr, depth = await live_images(machine)
     return _find_and_draw(bgr, depth)
@@ -120,14 +119,21 @@ async def hover_over_box(machine: RobotClient, box_center: Pose) -> None:
 
 
 async def pick_box(machine: RobotClient, box_center: Pose) -> None:
-    """Yixin owns this. Untested draft: never run on a real box yet; change or replace freely."""
+    """Approach the box top, engage vacuum, report grip status, and lift it."""
     gripper = Gripper.from_robot(machine, GRIPPER)
+    confirm("open the vacuum gripper (turn suction OFF)")
+    await gripper.open()
     await move_tip(machine, tip_target(box_center, APPROACH_MM), "approach above the box")
     await move_tip(machine, tip_target(box_center, -PRESS_MM), "lower onto the box top", straight_line=True)
     confirm("turn suction ON")
-    await gripper.grab()
+    grabbed = await gripper.grab()
+    print("grab() returned:", grabbed)
+    await asyncio.sleep(2)
+    status = await gripper.is_holding_something()
+    print("Holding an object:", status.is_holding_something)
     await move_tip(machine, tip_target(box_center, LIFT_MM), "lift the box", straight_line=True)
-    print("Holding something:", await gripper.is_holding_something())
+    status = await gripper.is_holding_something()
+    print("Holding something after lift:", status.is_holding_something)
 
 
 async def release(machine: RobotClient) -> None:
