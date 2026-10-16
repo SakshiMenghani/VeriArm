@@ -101,7 +101,7 @@ async def move_tip(machine: RobotClient, target: Pose, what: str, straight_line:
 def box_center_from(box: BoxDetection) -> Pose:
     """box_center for a detection: x, y = box center, z = TOP of the box (table top + known box height),
     theta = the box's yaw (direction of its long side, 0-180 deg, world frame)."""
-    top_z = TABLE_TOP_Z + KNOWN_BOXES[box.name][2]  # known height: the depth measurement varies ~5 mm
+    top_z = TABLE_TOP_Z + box.height_mm  # known height (or measured, for an "unknown" box: see detect.py)
     return Pose(x=box.x, y=box.y, z=top_z, o_x=0, o_y=0, o_z=1, theta=box.yaw_deg)
 
 
@@ -136,10 +136,11 @@ def _find_and_draw(bgr, depth) -> tuple[Pose, str]:
     save_debug_image(bgr, box, open_it=False)
     box_center = box_center_from(box)
     measured = f", camera saw {box.measured_height_mm:.0f}" if box.measured_height_mm is not None else ""
+    kind = "MEASURED, unknown box" if box.name == "unknown" else f"known{measured}"
     print(f"Box '{box.name}': top {box.length_mm:.0f} x {box.width_mm:.0f} mm (measured), "
-          f"height {box.height_mm:.0f} mm (known{measured}), yaw {box.yaw_deg:.0f} deg")
+          f"height {box.height_mm:.0f} mm ({kind}), yaw {box.yaw_deg:.0f} deg")
     print(f"  box_center (world mm):  x={box_center.x:.1f}  y={box_center.y:.1f}  z={box_center.z:.1f}  "
-          f"(z = top of the box: table {TABLE_TOP_Z:.0f} + {KNOWN_BOXES[box.name][2]:.0f} mm box height)")
+          f"(z = top of the box: table {TABLE_TOP_Z:.0f} + {box.height_mm:.0f} mm box height)")
     return box_center, box.name
 
 

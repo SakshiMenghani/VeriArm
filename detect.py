@@ -14,6 +14,7 @@ Setup commands (to find the box, use `python find_pick.py find`):
 """
 import argparse
 import asyncio
+import os
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -32,6 +33,14 @@ KNOWN_BOXES = {
     "large": (272.0, 170.0, 61.0),  # 10.7 x 6.7 x 2.4 in
     "tall": (234.0, 165.0, 140.0),  # ruler; camera reads ~154 tall: depth is ~14 mm short this close (~37 cm)
 }
+# TEMPORARY, for trying new boxes: VERIARM_UNKNOWN_BOXES=1 also accepts a box that matches no known size,
+# using the camera's MEASURED size and height (±5 mm normally; up to ~15 mm too high for tall boxes close
+# to the camera). Once it works, add the box to KNOWN_BOXES with ruler numbers and turn this off.
+ALLOW_UNKNOWN_BOXES = os.environ.get("VERIARM_UNKNOWN_BOXES", "0") == "1"
+UNKNOWN_SIDE_MM = (50.0, 330.0)      # min / max side length of an unknown box
+UNKNOWN_HEIGHT_MM = (20.0, 250.0)    # min / max height
+UNKNOWN_MIN_FILL = 0.85              # outline must fill its rectangle this well: boxes do, hands don't
+
 SIZE_TOLERANCE_MM = 30.0     # length / width
 HEIGHT_TOLERANCE_MM = 25.0     # depth reads up to ~15 mm off (bulging tops); our boxes differ by ~80 mm
 MIN_OBJECT_HEIGHT_MM = 20.0  # anything taller than this above the paper is an object
@@ -188,6 +197,7 @@ def find_box_in_photo(bgr: np.ndarray, view: dict, depth: np.ndarray | None = No
 
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     seen = []
+    unknown = None  # (rect, measured height) of the biggest box-like object that matched no known box
     for contour in sorted(contours, key=cv2.contourArea, reverse=True):
         if cv2.contourArea(contour) < 500:
             break
@@ -218,22 +228,23 @@ def find_box_in_photo(bgr: np.ndarray, view: dict, depth: np.ndarray | None = No
             if name is None:
                 h = f" x {height:.0f}" if height is not None else ""
                 seen.append(f"{length:.0f} x {width:.0f}{h} mm")
+                (w_px, h_px) = rect[1]
+                fill = cv2.contourArea(contour) / max(w_px * h_px, 1.0)
+                if (unknown is None and height is not None
+                        and _fully_visible(contour, bgr.shape, zone_rect)
+                        and UNKNOWN_SIDE_MM[0] <= width and length <= UNKNOWN_SIDE_MM[1]
+                        and UNKNOWN_HEIGHT_MM[0] <= height <= UNKNOWN_HEIGHT_MM[1]
+                        and fill >= UNKNOWN_MIN_FILL):
+                    unknown = (rect, height)
                 continue
 
         # The measurement only told us WHICH box this is. From here on use its known height, so
         # everyone (pick, inspection, place) works from the same exact number.
-        measured_height = height if depth is not None else None
-        known_height = KNOWN_BOXES[name][2]
-        top_z = TABLE_TOP_Z + known_height
-        corners = rect_corners_world(rect, view, top_z)
-        sides = side_lengths(corners)
-        length, width = max(sides), min(sides)
-        x, y = pixel_to_table(*rect[0], view, top_z)
-        i = int(np.argmax(sides))
-        dx, dy = np.subtract(corners[(i + 1) % 4], corners[i])
-        yaw = float(np.degrees(np.arctan2(dy, dx))) % 180.0
-        return BoxDetection(name, x, y, length, width, known_height, yaw, tuple(round(c) for c in rect[0]),
-                            cv2.boxPoints(rect).round().astype(int).tolist(), measured_height)
+        return _detection(name, rect, view, KNOWN_BOXES[name][2], height if depth is not None else None)
+
+    if ALLOW_UNKNOWN_BOXES and unknown is not None:
+        rect, height = unknown
+        return _detection("unknown", rect, view, height, height)
 
     detail = f" (saw objects: {'; '.join(seen)}; known boxes: " + ", ".join(
         f"{n} {l:.0f} x {w:.0f} x {h:.0f}" for n, (l, w, h) in KNOWN_BOXES.items()) + ")" if seen else ""
@@ -265,6 +276,31 @@ def save_debug_image(bgr: np.ndarray, box: BoxDetection | None, message: str = "
         if opener:
             subprocess.run(opener + [str(DEBUG_IMAGE)], check=False)
     return DEBUG_IMAGE
+
+
+def _fully_visible(contour, shape, zone_rect, edge_px: int = 6) -> bool:
+    """False if the object runs into the photo's edge or the edge of the search area (part of it is cut off,
+    so its center and size would be wrong)."""
+    x, y, w, h = cv2.boundingRect(contour)
+    if x <= edge_px or y <= edge_px or x + w >= shape[1] - edge_px or y + h >= shape[0] - edge_px:
+        return False
+    inner = zone_area_mask(shape, zone_rect, ZONE_SEARCH_MARGIN_PX - edge_px)
+    region = np.zeros(shape[:2], np.uint8)
+    cv2.drawContours(region, [contour], -1, 255, cv2.FILLED)
+    return not np.any((region > 0) & (inner == 0))
+
+
+def _detection(name: str, rect, view: dict, height: float, measured_height: float | None) -> BoxDetection:
+    """BoxDetection for a rect in the photo, with x, y, size and yaw computed at the box top (table + height)."""
+    top_z = TABLE_TOP_Z + height
+    corners = rect_corners_world(rect, view, top_z)
+    sides = side_lengths(corners)
+    x, y = pixel_to_table(*rect[0], view, top_z)
+    i = int(np.argmax(sides))
+    dx, dy = np.subtract(corners[(i + 1) % 4], corners[i])
+    yaw = float(np.degrees(np.arctan2(dy, dx))) % 180.0
+    return BoxDetection(name, x, y, max(sides), min(sides), height, yaw, tuple(round(c) for c in rect[0]),
+                        cv2.boxPoints(rect).round().astype(int).tolist(), measured_height)
 
 
 # ---------- live camera ----------

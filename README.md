@@ -70,6 +70,8 @@ Box 'large': top 287 x 175 mm (measured), height 61 mm (known, camera saw 56), y
 
 Each run also saves and opens a picture, `captures/detection.jpg`: **pink** = the blue zone, **yellow** = the detected box, **red cross** = the center it returns. Use it to check the detection by eye.
 
+**Trying a new box (temporary):** `VERIARM_UNKNOWN_BOXES=1 python find_pick.py find` (or `... python main.py`) also accepts a box that matches no entry in `KNOWN_BOXES`, as `unknown`, using the camera's **measured** size and height. It must look like a box (rectangular outline) and be fully visible. The measured height can be ~5 mm off, and up to ~15 mm too high for tall boxes, which can make the suction stop short. Once a box works, add it to `KNOWN_BOXES` with ruler numbers.
+
 If it can't give an answer, it says why and does nothing:
 
 | Message | Meaning | Fix |
