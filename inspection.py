@@ -332,8 +332,7 @@ async def inspect_box(machine: RobotClient, box_center: Pose, allow_turn: bool =
     found = best_label(report["faces"])
     if not found and missed and allow_turn:
         print(f"[inspect] no label; not seen: {', '.join(missed)} -> turning the box 180 deg")
-        here = Pose(x=det.x, y=det.y, z=TABLE_TOP_Z, o_x=0, o_y=0, o_z=1, theta=get_pose(VIEW)["tip_world"]["theta"])
-        await turn_box_around(machine, here)
+        await turn_box_around(machine, find_pick.box_center_from(det))  # z = box top
         report["turned"] = True
         await go_to_overview(machine)
         det = await detect_box(machine)

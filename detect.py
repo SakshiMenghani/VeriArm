@@ -175,8 +175,9 @@ def _object_mask_from_color(bgr, zone_rect):
     return cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((7, 7), np.uint8))
 
 
-def find_box(bgr: np.ndarray, view: dict, depth: np.ndarray | None = None, zone_rect=None) -> BoxDetection:
-    """Find a known box in (or slightly over) the blue zone. Raises ZoneBlockedError or NoBoxError."""
+def find_box_in_photo(bgr: np.ndarray, view: dict, depth: np.ndarray | None = None, zone_rect=None) -> BoxDetection:
+    """Find a known box in (or slightly over) the blue zone in an already-taken photo.
+    Raises ZoneBlockedError or NoBoxError. (find_pick.find_box is the one that moves the arm first.)"""
     zone_rect = zone_rect or saved_zone_rect()
     if depth is not None:
         mask, paper_depth = _object_mask_from_depth(bgr, depth, zone_rect)
@@ -266,7 +267,7 @@ def point_cloud_to_depth(pcd: bytes, shape: tuple) -> np.ndarray | None:
 async def detect_box(machine) -> BoxDetection:
     """Live: photograph from VIEW and find the box. Raises NotAtViewError, ZoneBlockedError, NoBoxError."""
     bgr, depth = await live_images(machine)
-    return find_box(bgr, get_pose(VIEW), depth)
+    return find_box_in_photo(bgr, get_pose(VIEW), depth)
 
 
 async def _live_main() -> tuple:
@@ -312,7 +313,7 @@ def main():
 
     print(f"Depth: {'yes' if depth is not None else 'no (color fallback)'}")
     try:
-        box = find_box(bgr, view, depth)
+        box = find_box_in_photo(bgr, view, depth)
         print(f"Box '{box.name}': center x={box.x:.1f}  y={box.y:.1f}, top {box.length_mm:.0f} x {box.width_mm:.0f} mm, "
               f"{box.height_mm:.0f} mm tall, yaw {box.yaw_deg:.0f} deg")
     except LookupError as e:

@@ -1,4 +1,4 @@
-"""Sandy: find the box in the blue zone and pick it up with suction.
+"""Find the box in the blue zone (Sandy: find_box, locate) and pick it up (Yixin: pick_box).
 
 find_box() takes a live photo from overview-blue and finds the box anywhere in the blue zone.
 If the zone is blocked or there's no box, it raises an error instead of guessing.
@@ -7,9 +7,11 @@ Every motion asks for confirmation unless --yes is passed. Keep someone at the e
 
 Usage:
     python find_pick.py plan      # print the targets, no connection to the robot
+    python find_pick.py locate    # no motion: arm must be at overview; print where the box is
+    python find_pick.py locate --image reference/box-center.jpg   # same, offline from a saved photo
     python find_pick.py find      # move to overview, print box_center
     python find_pick.py hover     # put the suction tip 50 mm above the box top (hover test)
-    python find_pick.py pick      # pick the box: approach, lower, suction on, lift
+    python find_pick.py pick      # pick the box (Yixin's, untested draft): approach, lower, suction on, lift
     python find_pick.py release   # turn suction off
 """
 import argparse
@@ -23,14 +25,14 @@ from viam.proto.service.motion import Constraints, LinearConstraint
 from viam.robot.client import RobotClient
 from viam.services.motion import MotionClient
 
-from detect import KNOWN_BOXES, TABLE_TOP_Z, detect_box
+from detect import KNOWN_BOXES, TABLE_TOP_Z, VIEW, BoxDetection, detect_box, find_box_in_photo
 from poses import get_pose
 from robot import ARM, GRIPPER, MOTION, connect
 
 OVERVIEW = "overview-blue"
 
-# The box we demo with (detect.KNOWN_BOXES). TODO when we use several sizes: take the
-# height from the detection instead of this constant.
+# The box we demo with (detect.KNOWN_BOXES). find_box() uses the height of whichever
+# known box it detects; this is only for the offline `plan` printout.
 BOX_L, BOX_W, BOX_H = KNOWN_BOXES["large"]
 
 # The real suction tip is ~17 mm lower than the config thinks (measured twice by hand,
@@ -50,11 +52,11 @@ def confirm(what: str) -> None:
 
 
 def tip_target(box_center: Pose, height_above_top: float) -> Pose:
-    """Suction tip pointing straight down, `height_above_top` mm above the real box top."""
+    """Suction tip pointing straight down, `height_above_top` mm above the real box top (box_center.z)."""
     return Pose(
         x=box_center.x,
         y=box_center.y,
-        z=box_center.z + BOX_H + height_above_top + SUCTION_Z_CORRECTION_MM,
+        z=box_center.z + height_above_top + SUCTION_Z_CORRECTION_MM,
         o_x=0, o_y=0, o_z=-1,
         theta=box_center.theta,
     )
@@ -71,8 +73,15 @@ async def move_tip(machine: RobotClient, target: Pose, what: str, straight_line:
     )
 
 
+def box_center_from(box: BoxDetection) -> Pose:
+    """box_center for a detection: x, y = box center, z = TOP of the box (table top + known box height)."""
+    theta = get_pose(OVERVIEW)["tip_world"]["theta"]
+    top_z = TABLE_TOP_Z + KNOWN_BOXES[box.name][2]  # known height: the depth measurement runs ~5 mm low
+    return Pose(x=box.x, y=box.y, z=top_z, o_x=0, o_y=0, o_z=1, theta=theta)
+
+
 async def find_box(machine: RobotClient) -> Pose:
-    """Move to overview and return box_center: x, y of the box, z = table top (box bottom), mm, world frame."""
+    """Move to overview and return box_center: x, y = center of the box, z = TOP of the box. mm, world frame."""
     # Use the saved joint angles, not the tip pose: the planner can reach the same tip pose
     # with a different arm posture (we saw it pick one at a joint limit), and detection
     # needs the camera exactly where it was when the pose was recorded.
@@ -80,8 +89,7 @@ async def find_box(machine: RobotClient) -> Pose:
     await Arm.from_robot(machine, ARM).move_to_joint_positions(JointPositions(values=get_pose(OVERVIEW)["joints"]))
     box = await detect_box(machine)  # raises ZoneBlockedError / NoBoxError: don't guess, let the caller decide
     print(f"Box found: x={box.x:.1f} y={box.y:.1f}, {box.length_mm:.0f} x {box.width_mm:.0f} mm, yaw {box.yaw_deg:.0f} deg")
-    theta = get_pose(OVERVIEW)["tip_world"]["theta"]
-    return Pose(x=box.x, y=box.y, z=TABLE_TOP_Z, o_x=0, o_y=0, o_z=1, theta=theta)
+    return box_center_from(box)
 
 
 async def hover_over_box(machine: RobotClient, box_center: Pose) -> None:
@@ -90,6 +98,7 @@ async def hover_over_box(machine: RobotClient, box_center: Pose) -> None:
 
 
 async def pick_box(machine: RobotClient, box_center: Pose) -> None:
+    """Yixin owns this. Untested draft: never run on a real box yet; change or replace freely."""
     gripper = Gripper.from_robot(machine, GRIPPER)
     await move_tip(machine, tip_target(box_center, APPROACH_MM), "approach above the box")
     await move_tip(machine, tip_target(box_center, -PRESS_MM), "lower onto the box top", straight_line=True)
@@ -104,13 +113,27 @@ async def release(machine: RobotClient) -> None:
     await Gripper.from_robot(machine, GRIPPER).open()
 
 
+def print_locate(box: BoxDetection) -> None:
+    """Print where the box is (no grip decisions: that's pick_box's job)."""
+    print(f"Box '{box.name}': {box.length_mm:.0f} x {box.width_mm:.0f} x {box.height_mm:.0f} mm (measured), "
+          f"yaw {box.yaw_deg:.0f} deg")
+    c = box_center_from(box)
+    print(f"  box_center (world mm):  x={c.x:.1f}  y={c.y:.1f}  z={c.z:.1f}  "
+          f"(z = top of the box: table {TABLE_TOP_Z:.0f} + {KNOWN_BOXES[box.name][2]:.0f} mm box height)")
+
+
+async def locate(machine: RobotClient) -> None:
+    """No motion: photograph from overview and print where the box is."""
+    print_locate(await detect_box(machine))
+
+
 def print_plan() -> None:
     zone = get_pose("blue_zone")["center_world"]
     theta = get_pose(OVERVIEW)["tip_world"]["theta"]
-    box_center = Pose(x=zone["x"], y=zone["y"], z=TABLE_TOP_Z, theta=theta)
+    box_center = Pose(x=zone["x"], y=zone["y"], z=TABLE_TOP_Z + BOX_H, theta=theta)
     print(f"Example: box at the blue zone center x={box_center.x:.1f} y={box_center.y:.1f}, "
           f"box {BOX_L:.0f} x {BOX_W:.0f} x {BOX_H:.0f} mm")
-    print(f"box top (real): z={TABLE_TOP_Z + BOX_H:.1f}")
+    print(f"box_center.z = box top (real): z={box_center.z:.1f}")
     for label, h in (("approach", APPROACH_MM), ("contact", -PRESS_MM), ("lift", LIFT_MM)):
         t = tip_target(box_center, h)
         print(f"  {label:9s} commanded tip z={t.z:6.1f}  (real tip ~{h:+.0f} mm vs box top)")
@@ -119,18 +142,36 @@ def print_plan() -> None:
 async def main():
     global ASK_BEFORE_MOVING
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("action", choices=["plan", "find", "hover", "pick", "release"])
+    parser.add_argument("action", choices=["plan", "locate", "find", "hover", "pick", "release"])
     parser.add_argument("--yes", action="store_true", help="don't ask before each motion")
+    parser.add_argument("--image", help="locate only: use a saved photo from overview-blue (+ its .npy depth)")
     args = parser.parse_args()
     ASK_BEFORE_MOVING = not args.yes
 
     if args.action == "plan":
         print_plan()
         return
+    if args.action == "locate" and args.image:
+        import cv2
+        import numpy as np
+        from pathlib import Path
+        depth_file = Path(args.image).with_suffix(".npy")
+        depth = np.load(depth_file) if depth_file.exists() else None
+        try:
+            print_locate(find_box_in_photo(cv2.imread(args.image), get_pose(VIEW), depth))
+        except LookupError as e:
+            raise SystemExit(f"{type(e).__name__}: {e}")
+        return
 
     async with await connect() as machine:
         if args.action == "release":
             await release(machine)
+            return
+        if args.action == "locate":
+            try:
+                await locate(machine)
+            except (LookupError, RuntimeError) as e:  # NoBoxError, ZoneBlockedError, NotAtViewError
+                raise SystemExit(f"{type(e).__name__}: {e}")
             return
         try:
             box_center = await find_box(machine)

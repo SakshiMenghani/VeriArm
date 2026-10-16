@@ -20,7 +20,7 @@ The arm finds a package in the blue (incoming) area, finds and reads its QR labe
 ## Main loop
 
 1. Move to `overview` (fixed pose) above the blue zone and take a photo.
-2. Find the box: anything standing >25 mm above the blue zone (from the point cloud) is the box. Gives center, size, rotation, height. Saved to `runs/last_box.json`. Status: DETECTED.
+2. Find the box (`find_pick.find_box` / `detect.py`): a known box size standing above the blue zone. Gives center (`box_center`, z = box top), size, rotation. Status: DETECTED.
 3. Build inspection views from the detected box: top (camera straight down) + 4 sides (camera looking down at each face at 25°, steeper if unreachable).
 4. Visit each view (top first, then sides nearest the arm first), let the arm settle, grab a frame, try to decode a QR code. Skip views the arm can't reach or that would put the camera in the wall. Stop as soon as a code decodes. The box is passed to the planner as an obstacle.
 5. If no code was found: the label is probably on the bottom. The camera is on the arm, so it can't see the bottom of a box the arm is holding. Instead, pick the box, set it back down tipped onto a side so the bottom faces sideways, and re-run step 4 once. (Open question: does the suction hold well enough to tip it?)
@@ -38,8 +38,8 @@ The camera is on the arm, so converting a pixel to a table position only works i
 Computed from the detected box (center, size, rotation), so the box can be anywhere on the zone, at any angle. The camera (not the gripper) is the component moved, so the frame system handles the camera offset.
 
 ```
-top  = 250 mm above the top face, camera straight down
-side = 260 mm from the face center, camera looking down at it at 25° (then 40/55/70° if unreachable)
+top  = 250 mm above the top face, camera straight down        (box_center.z is the box TOP)
+side = 260 mm from the face center, camera looking down at it at 25° (then steeper/closer if unreachable)
 ```
 
 Measured on Oct 16 with the real box: top and three sides are reachable at the first angle. The side facing the front wall (+x) is skipped because the camera would be inside the wall. The blue zone's far edge is only ~4 cm from the wall.
@@ -48,23 +48,22 @@ Measured on Oct 16 with the real box: top and three sides are reachable at the f
 
 ## Team breakdown
 
-### Sandy — find and reach the box
-- `find_box() -> box_center`: move to `overview`, detect the box in the blue zone, return its position. Start hardcoded, then real detection.
-- `pick_box(box_center)`: lower onto the top, turn on suction, lift.
-- Shared setup: Viam machine config, camera-to-gripper offset (frame system), saved poses.
-- **Test:** hover the gripper over the point `find_box` returns and check it's within a couple of cm of the real center.
+### Sandy — find the box
+- `find_box(machine) -> box_center`: move to `overview-blue`, detect the box in the blue zone (by depth + size, `detect.KNOWN_BOXES`), return its position. Raises `NoBoxError` / `ZoneBlockedError` instead of guessing. **Done; live detection works.**
+- `python find_pick.py locate`: print where the box is without moving (arm at `overview-blue`, or `--image` on a saved photo).
+- Shared setup: frame system check, 17 mm tip offset, saved poses, `blue_zone`. **Done.**
+- **Test:** hover the gripper over the point `find_box` returns and check it's within a couple of cm of the real center. **Passed** (blue zone center).
+- Todo: test detection with the box off-center and rotated.
 
 ### Sakshi — inspect the box, labels, verification
-- `inspect_box(machine, box) -> str | None` in `inspection.py`: visit the views, decode QR, return the raw label text. Every image + a report goes to `runs/inspect_<time>/` and `runs/last_inspection.json`.
-- Built so far to test inspection end to end (Sandy: please review / take over what overlaps with yours):
-  - `calibrate_zone.py`: measures the blue zone once (empty zone) → `zone.json`. Saved the `overview` pose with `record_pose.py`.
-  - `find_box.py`: `find_box(machine) -> dict | None` from the point cloud. Tested: within ~4 mm of the real box size, follows rotation.
-- Labels & inventory: `inventory.py` (database + `verify`), `make_labels.py` (printable labels). See below.
-- `scan.py`: find → inspect → verify in one command (no pick/place).
-- Bottom fallback: tip the box onto a side and re-inspect (see main loop step 5). Needs `pick_box` from Sandy.
-- **Test:** `python inspection.py --decode <image>` / `--plan` (no motion), then `python scan.py`.
+- `inspect_box(machine, box_center) -> str | None` in `inspection.py`: photograph the 5 visible faces (top, then the sides going around the box), decode QR, stop at the first valid VeriArm label, return the raw label text. Gets the box's size/yaw from `detect.detect_box`. Every image + a report goes to `runs/inspect_<time>/` and `runs/last_inspection.json`.
+- Labels & inventory: `inventory.py` (database + `verify`), `make_labels.py` (printable labels), `label_api.py` (live QR API). See below.
+- `scan.py`: `scan(machine)` = find → inspect → verify; returns the handoff result for pick/place (see "Scan result" below).
+- Bottom fallback / wall side: `inspection.py --turn` picks the box (`pick_box`), turns it 180° and re-reads. Untested.
+- **Test:** `python inspection.py --decode <image>` / `--plan` (no motion), then `python scan.py --yes`.
 
-### Yixin — sort the box and notify
+### Yixin — pick, sort the box, and notify
+- `pick_box(machine, box_center)`: work out the grip point, lower onto the top, turn on suction, lift. Starting point: the untested draft in `find_pick.py`. Inputs: `box_center` (x, y = box center; **z = top of the box**, so aim the suction cup at `box_center.z` directly), tip 17 mm lower than the config thinks, move the tip with the motion service (gripper as the component).
 - `place_box(verified: bool)`: carry the picked box to V or R, lower it, release suction, return to a safe pose.
 - `notify_done(result)`: send the "done" notification.
 - **Test:** jog the arm, pick a box with a manual suction command, test both drops and the notification.
@@ -95,7 +94,7 @@ Measured on Oct 16 with the real box: top and three sides are reachable at the f
 ```python
 result = await scan(machine)
 if result is not None:
-    await pick_box(machine, result["box_center_pose"])   # same Pose find_box() returns
+    await pick_box(machine, result["box_center_pose"])   # Yixin; same Pose find_box() returns
     await place_box(machine, result["accepted"])         # True -> green, False -> orange
     await notify_done(result)                            # result["say"] for voice
 ```
@@ -108,7 +107,7 @@ if result is not None:
 | `reason` | `"Matches inventory"`, `"Not in inventory"`, `"Recipient does not match"`, `"Not expected"`, `"Label is not a VeriArm code"`, `"No label found"`, `"Label seen on the +x side but could not be read"` | announcement / log |
 | `package_id`, `recipient` | `"PKG-001"`, `"Sakshi Menghani"` (null if no readable label) | announcement / log |
 | `label_text`, `label_face` | `"VA1\|PKG-001\|Sakshi Menghani"`, `"-x side"` | debugging |
-| `box_center` | `{x, y, z, theta}` world mm, z = table top | for `pick_box` (Python also gets `box_center_pose` as a `Pose`) |
+| `box_center` | `{x, y, z, theta}` world mm, z = box top (same as `find_box`) | for `pick_box` (Python also gets `box_center_pose` as a `Pose`) |
 | `box` | `{length_mm, width_mm, height_mm, yaw_deg}` | |
 | `say` | `"Package PKG-001 for Sakshi Menghani verified. Accepted."` | voice |
 | `inspection_dir` | `runs/inspect_<time>` | one photo per face + `contact.jpg` |
@@ -117,12 +116,12 @@ Known limit: a label on the side facing the wall is seen only at a steep angle a
 
 ## Interfaces (agree on these first)
 
-- `box_center`: a `Pose` in **mm**, in the **arm's base frame** (same as Viam's world frame). x, y = center of the box's footprint; **z = table top, i.e. the box's bottom** (−23 mm). The box top is `box_center.z + 61`.
+- `box_center`: a `Pose` in **mm**, in the **arm's base frame** (same as Viam's world frame). x, y = center of the box; **z = the TOP of the box** (table top −23 + the detected box's known height; +38 mm for the current box). The table top is always z = −23. *(Changed Oct 16: z used to be the table top. If you wrote `box_center.z + 61`, drop the `+ 61`.)*
 - Function signatures:
 
   ```python
   async def find_box(machine) -> Pose                              # Sandy
-  async def pick_box(machine, box_center: Pose) -> None            # Sandy
+  async def pick_box(machine, box_center: Pose) -> None            # Yixin
   async def inspect_box(machine, box_center: Pose) -> str | None   # Sakshi (raw QR text; re-detects yaw/size via detect.py)
   def verify(label_text: str | None) -> Result                     # Sakshi (inventory.py; result.accepted is the bool)
   async def place_box(machine, verified: bool) -> None             # Yixin

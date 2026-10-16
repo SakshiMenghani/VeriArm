@@ -8,7 +8,7 @@ Status flow: DETECTED (box found in blue zone) -> ACCEPTED (green zone) or REJEC
 In main.py (connect once, pass machine):
     result = await scan(machine)                    # dict, also saved to runs/last_result.json
     if result is not None:
-        await pick_box(machine, result["box_center_pose"])   # Sandy
+        await pick_box(machine, result["box_center_pose"])   # Yixin
         await place_box(machine, result["accepted"])         # Yixin: True -> green, False -> orange
         await notify_done(result)                            # Yixin: result["say"] for voice
 
@@ -23,7 +23,7 @@ Result fields (JSON in runs/last_result.json; same dict in Python, plus "box_cen
     recipient     "Sakshi Menghani" | null     from the inventory when accepted, else from the QR
     label_text    raw QR text, e.g. "VA1|PKG-001|Sakshi Menghani" | null
     label_face    "top" | "-x side" | ... | null   which face the label was read on
-    box_center    {x, y, z, theta}             world mm; z = table top (box bottom); same as find_box()
+    box_center    {x, y, z, theta}             world mm; z = TOP of the box; same as find_box()
     box           {length_mm, width_mm, height_mm, yaw_deg}
     say           sentence for the voice announcement
     inspection_dir  runs/<folder> with one photo per face + contact.jpg
