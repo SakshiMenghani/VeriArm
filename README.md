@@ -31,6 +31,7 @@ VIAM_API_KEY_ID=...
 
 - `robot.py`: shared `connect()` helper that reads `.env`, plus component name constants (`ARM`, `GRIPPER`, `CAMERA`, `MOTION`)
 - `connect_test.py`: read-only smoke test (lists resources, reads arm pose, saves camera frames to `captures/`)
+- `check_frames.py`: read-only frame system report (what each part is attached to, offsets, obstacles, where the camera and suction tip are now)
 
 ## Machine resources
 
