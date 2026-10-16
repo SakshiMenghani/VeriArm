@@ -116,7 +116,7 @@ Known limit: a label on the side facing the wall is seen only at a steep angle a
 
 ## Interfaces (agree on these first)
 
-- `box_center`: a `Pose` in **mm**, in the **arm's base frame** (same as Viam's world frame). x, y = center of the box; **z = the TOP of the box** (table top −23 + the detected box's known height; +38 mm for the current box). The table top is always z = −23. *(Changed Oct 16: z used to be the table top. If you wrote `box_center.z + 61`, drop the `+ 61`.)*
+- `box_center`: a `Pose` in **mm**, in the **arm's base frame** (same as Viam's world frame). x, y = center of the box; **z = the TOP of the box** (table top −23 + the detected box's known height; +38 mm for the current box). The table top is always z = −23. *(Changed Oct 16: z used to be the table top. If you wrote `box_center.z + 61`, drop the `+ 61`.)* **`box_center.theta` = the box's yaw** (direction of its long side, 0–180°), not a wrist angle. For the wrist rotation when moving the suction tip, `find_pick.tip_target(..., tip_theta=...)` defaults to the overview's wrist angle.
 - Function signatures:
 
   ```python

@@ -52,14 +52,22 @@ def confirm(what: str) -> None:
         raise SystemExit("Aborted.")
 
 
-def tip_target(box_center: Pose, height_above_top: float) -> Pose:
-    """Suction tip pointing straight down, `height_above_top` mm above the real box top (box_center.z)."""
+def overview_tip_theta() -> float:
+    """The suction tip's rotation (wrist roll) at overview-blue. Our default wrist rotation for picking."""
+    return get_pose(OVERVIEW)["tip_world"]["theta"]
+
+
+def tip_target(box_center: Pose, height_above_top: float, tip_theta: float | None = None) -> Pose:
+    """Suction tip pointing straight down, `height_above_top` mm above the real box top (box_center.z).
+
+    tip_theta is the wrist rotation; default = the overview's, so the wrist doesn't twist to follow
+    the box (the suction cup is round). Note box_center.theta is the BOX's yaw, not a wrist angle."""
     return Pose(
         x=box_center.x,
         y=box_center.y,
         z=box_center.z + height_above_top + SUCTION_Z_CORRECTION_MM,
         o_x=0, o_y=0, o_z=-1,
-        theta=box_center.theta,
+        theta=overview_tip_theta() if tip_theta is None else tip_theta,
     )
 
 
@@ -75,14 +83,14 @@ async def move_tip(machine: RobotClient, target: Pose, what: str, straight_line:
 
 
 def box_center_from(box: BoxDetection) -> Pose:
-    """box_center for a detection: x, y = box center, z = TOP of the box (table top + known box height)."""
-    theta = get_pose(OVERVIEW)["tip_world"]["theta"]
-    top_z = TABLE_TOP_Z + KNOWN_BOXES[box.name][2]  # known height: the depth measurement runs ~5 mm low
-    return Pose(x=box.x, y=box.y, z=top_z, o_x=0, o_y=0, o_z=1, theta=theta)
+    """box_center for a detection: x, y = box center, z = TOP of the box (table top + known box height),
+    theta = the box's yaw (direction of its long side, 0-180 deg, world frame)."""
+    top_z = TABLE_TOP_Z + KNOWN_BOXES[box.name][2]  # known height: the depth measurement varies ~5 mm
+    return Pose(x=box.x, y=box.y, z=top_z, o_x=0, o_y=0, o_z=1, theta=box.yaw_deg)
 
 
 async def find_box(machine: RobotClient, move: bool = True) -> Pose:
-    """Return box_center: x, y = center of the box, z = TOP of the box. mm, world frame.
+    """Return box_center: x, y = center of the box, z = TOP of the box, theta = box yaw (deg). mm, world frame.
 
     move=True: first move the arm to overview-blue. move=False: the arm must already be there.
     Raises NoBoxError / ZoneBlockedError (and NotAtViewError if move=False and the arm is elsewhere)
@@ -155,8 +163,7 @@ def _open_picture() -> None:
 
 def print_plan() -> None:
     zone = get_pose("blue_zone")["center_world"]
-    theta = get_pose(OVERVIEW)["tip_world"]["theta"]
-    box_center = Pose(x=zone["x"], y=zone["y"], z=TABLE_TOP_Z + BOX_H, theta=theta)
+    box_center = Pose(x=zone["x"], y=zone["y"], z=TABLE_TOP_Z + BOX_H, o_z=1, theta=90)
     print(f"Example: box at the blue zone center x={box_center.x:.1f} y={box_center.y:.1f}, "
           f"box {BOX_L:.0f} x {BOX_W:.0f} x {BOX_H:.0f} mm")
     print(f"box_center.z = box top (real): z={box_center.z:.1f}")
