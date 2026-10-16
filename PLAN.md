@@ -70,17 +70,27 @@ The code always computes poses as `box_center + offset`. For the first version, 
 
 ## Interfaces (agree on these first)
 
-- `box_center`: x, y (and z if available) in **mm**, in the **arm's base frame**.
+- `box_center`: a `Pose` in **mm**, in the **arm's base frame** (same as Viam's world frame). x, y = center of the box's footprint; **z = table top, i.e. the box's bottom** (−23 mm). The box top is `box_center.z + 24`.
 - Function signatures:
 
   ```python
-  async def find_box() -> Pose                     # Sandy
-  async def pick_box(box_center: Pose) -> None     # Sandy
-  async def inspect_box(box_center: Pose) -> str | None   # Sakshi
-  async def verify(package_id: str | None) -> bool # TBD
-  async def place_box(verified: bool) -> None      # Yixin
-  async def notify_done(package_id: str | None, verified: bool) -> None  # Yixin
+  async def find_box(machine) -> Pose                              # Sandy
+  async def pick_box(machine, box_center: Pose) -> None            # Sandy
+  async def inspect_box(machine, box_center: Pose) -> str | None   # Sakshi
+  async def verify(package_id: str | None) -> bool                 # TBD (no robot needed)
+  async def place_box(machine, verified: bool) -> None             # Yixin
+  async def notify_done(package_id: str | None, verified: bool) -> None  # Yixin (no robot needed)
   ```
+
+- `machine` is the live robot connection from `robot.connect()`. **Don't call `connect()` inside these functions.** `main.py` connects once and passes `machine` to each step:
+
+  ```python
+  async with await connect() as machine:
+      box_center = await find_box(machine)
+      ...
+  ```
+
+  One connection for the whole run, and the functions can move into a Viam module later without changes.
 
 ## Build order
 
