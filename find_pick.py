@@ -106,8 +106,9 @@ def _find_and_draw(bgr, depth) -> Pose:
         raise
     save_debug_image(bgr, box, open_it=False)
     box_center = box_center_from(box)
-    print(f"Box '{box.name}': {box.length_mm:.0f} x {box.width_mm:.0f} x {box.height_mm:.0f} mm (measured), "
-          f"yaw {box.yaw_deg:.0f} deg")
+    measured = f", camera saw {box.measured_height_mm:.0f}" if box.measured_height_mm is not None else ""
+    print(f"Box '{box.name}': top {box.length_mm:.0f} x {box.width_mm:.0f} mm (measured), "
+          f"height {box.height_mm:.0f} mm (known{measured}), yaw {box.yaw_deg:.0f} deg")
     print(f"  box_center (world mm):  x={box_center.x:.1f}  y={box_center.y:.1f}  z={box_center.z:.1f}  "
           f"(z = top of the box: table {TABLE_TOP_Z:.0f} + {KNOWN_BOXES[box.name][2]:.0f} mm box height)")
     return box_center

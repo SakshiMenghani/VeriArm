@@ -55,12 +55,12 @@ In code it's the same function: `find_box(machine)` or `find_box(machine, move=F
 Example output:
 
 ```
-Box 'large': 290 x 177 x 56 mm (measured), yaw 93 deg
-  box_center (world mm):  x=349.6  y=131.4  z=38.0  (z = top of the box: table -23 + 61 mm box height)
+Box 'large': top 287 x 175 mm (measured), height 61 mm (known, camera saw 56), yaw 93 deg
+  box_center (world mm):  x=349.6  y=131.1  z=38.0  (z = top of the box: table -23 + 61 mm box height)
 ```
 
 - **`box_center`**: center of the box's footprint, in mm, in the world frame (same as the arm's base frame). This is exactly what `find_box()` returns. **`z` is the top of the box** (where the suction cup goes): the table top (−23) plus the known height of the detected box.
-- **Size and yaw**: measured from the camera, so they include the box's end flaps (a bit bigger than 272 x 170 x 61). `yaw` is the direction of the long side, 0-180 deg.
+- **Size and yaw**: length/width are measured from the camera, so they include the box's end flaps (a bit bigger than 272 x 170). **Height is the known height** of the matched box (`KNOWN_BOXES`), not the camera's reading, which varies by ~5 mm; the camera's value is shown for reference (`measured_height_mm` in code). `yaw` is the direction of the long side, 0-180 deg.
 - To send the suction tip somewhere, remember the tip is **17 mm lower** than the robot thinks (see PLAN.md).
 
 Each run also saves and opens a picture, `captures/detection.jpg`: **pink** = the blue zone, **yellow** = the detected box, **red cross** = the center it returns. Use it to check the detection by eye.

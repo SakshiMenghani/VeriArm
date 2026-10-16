@@ -63,10 +63,11 @@ class BoxDetection:
     y: float
     length_mm: float         # measured size of the top face
     width_mm: float
-    height_mm: float         # measured from depth (or the known height if no depth)
+    height_mm: float         # KNOWN height of the matched box (KNOWN_BOXES): use this for positions
     yaw_deg: float           # direction of the long side in the world x-y plane, 0-180
     pixel: tuple             # center in the photo
     corners_px: list         # outline in the photo (4 corners), for drawing
+    measured_height_mm: float | None = None  # what the depth camera saw (varies ~5 mm); for recognizing/debugging
 
 
 # ---------- geometry ----------
@@ -218,12 +219,20 @@ def find_box_in_photo(bgr: np.ndarray, view: dict, depth: np.ndarray | None = No
                 seen.append(f"{length:.0f} x {width:.0f}{h} mm")
                 continue
 
+        # The measurement only told us WHICH box this is. From here on use its known height, so
+        # everyone (pick, inspection, place) works from the same exact number.
+        measured_height = height if depth is not None else None
+        known_height = KNOWN_BOXES[name][2]
+        top_z = TABLE_TOP_Z + known_height
+        corners = rect_corners_world(rect, view, top_z)
+        sides = side_lengths(corners)
+        length, width = max(sides), min(sides)
         x, y = pixel_to_table(*rect[0], view, top_z)
         i = int(np.argmax(sides))
         dx, dy = np.subtract(corners[(i + 1) % 4], corners[i])
         yaw = float(np.degrees(np.arctan2(dy, dx))) % 180.0
-        return BoxDetection(name, x, y, length, width, height if height is not None else KNOWN_BOXES[name][2],
-                            yaw, tuple(round(c) for c in rect[0]), cv2.boxPoints(rect).round().astype(int).tolist())
+        return BoxDetection(name, x, y, length, width, known_height, yaw, tuple(round(c) for c in rect[0]),
+                            cv2.boxPoints(rect).round().astype(int).tolist(), measured_height)
 
     detail = f" (saw objects: {'; '.join(seen)}; known boxes: " + ", ".join(
         f"{n} {l:.0f} x {w:.0f} x {h:.0f}" for n, (l, w, h) in KNOWN_BOXES.items()) + ")" if seen else ""
