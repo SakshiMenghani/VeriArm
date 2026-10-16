@@ -91,12 +91,17 @@ def connect_db(path: Path = DB_FILE) -> sqlite3.Connection:
             reason     TEXT NOT NULL,
             label_face TEXT,
             box_x REAL, box_y REAL, box_z REAL, box_theta REAL,  -- box_center: world mm, z = box top, theta = box yaw
+            drop_x REAL, drop_y REAL, drop_z REAL,               -- drop_center: where to put it (z = box top there)
             say        TEXT,
             placed_at  TEXT               -- NULL until the box has been put in its zone
         );
     """)
     cols = {r["name"] for r in db.execute("PRAGMA table_info(items)")}
     scan_cols = {r["name"] for r in db.execute("PRAGMA table_info(scans)")}
+    result_cols = {r["name"] for r in db.execute("PRAGMA table_info(results)")}
+    for col in ("drop_x", "drop_y", "drop_z"):  # results table from before drop_center existed
+        if col not in result_cols:
+            db.execute(f"ALTER TABLE results ADD COLUMN {col} REAL")
     if not {"status", "recipient"} <= cols or not {"status", "recipient"} <= scan_cols:
         db.close()  # db from an older version: rebuild (it's local)
         path.unlink()
@@ -239,12 +244,15 @@ def save_result(result: dict, db: sqlite3.Connection | None = None) -> int:
     db, own = _connect_or(db)
     try:
         c = result["box_center"]
+        d = result.get("drop_center") or {}
         cur = db.execute(
             "INSERT INTO results (ts, status, zone, accepted, package_id, recipient, reason, label_face, "
-            "box_x, box_y, box_z, box_theta, say) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "box_x, box_y, box_z, box_theta, drop_x, drop_y, drop_z, say) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (result.get("time") or datetime.now().isoformat(timespec="seconds"), result["status"], result["zone"],
              1 if result["accepted"] else 0, result.get("package_id"), result.get("recipient"), result["reason"],
-             result.get("label_face"), c["x"], c["y"], c["z"], c["theta"], result.get("say")))
+             result.get("label_face"), c["x"], c["y"], c["z"], c["theta"],
+             d.get("x"), d.get("y"), d.get("z"), result.get("say")))
         db.commit()
         return cur.lastrowid
     finally:
@@ -256,12 +264,14 @@ def _result_row_to_dict(row: sqlite3.Row) -> dict:
     d = dict(row)
     d["accepted"] = bool(d["accepted"])
     d["box_center"] = {k: d.pop(f"box_{k}") for k in ("x", "y", "z", "theta")}
+    d["drop_center"] = {k: d.pop(f"drop_{k}") for k in ("x", "y", "z")}
     return d
 
 
 def next_to_place(db: sqlite3.Connection | None = None) -> dict | None:
     """The most recent scanned box that hasn't been placed yet, or None.
-    Keys: result_id, zone ("green"/"orange"), accepted, box_center {x, y, z, theta}, status, reason,
+    Keys: result_id, zone ("green"/"orange"), accepted, box_center {x, y, z, theta}, drop_center {x, y, z},
+    status, reason,
     package_id, recipient, label_face, say, ts. Older unplaced results are ignored (the box was rescanned)."""
     db, own = _connect_or(db)
     try:
@@ -321,7 +331,9 @@ def main():
         else:
             c = r["box_center"]
             print(f"result {r['result_id']}: {r['status']} -> place in {r['zone'].upper()} zone  ({r['reason']})")
-            print(f"  box_center: x={c['x']} y={c['y']} z={c['z']} theta={c['theta']}   package={r['package_id']}")
+            dc = r["drop_center"]
+            print(f"  box_center:  x={c['x']} y={c['y']} z={c['z']} theta={c['theta']}   package={r['package_id']}")
+            print(f"  drop_center: x={dc['x']} y={dc['y']} z={dc['z']}   (where to put it)")
     elif args.cmd == "results":
         for r in db.execute("SELECT * FROM results ORDER BY result_id DESC LIMIT 20"):
             print(f"  #{r['result_id']:<3} {r['ts']}  {r['status']:8} -> {r['zone']:6}  {r['package_id'] or '-':10}"

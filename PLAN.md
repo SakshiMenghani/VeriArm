@@ -120,7 +120,8 @@ if result is not None:
 | `reason` | `"Matches inventory"`, `"Not in inventory"`, `"Recipient does not match"`, `"Not expected"`, `"Label is not a VeriArm code"`, `"No label found"`, `"Label seen on the +x side but could not be read"` | announcement / log |
 | `package_id`, `recipient` | `"PKG-001"`, `"Sakshi Menghani"` (null if no readable label) | announcement / log |
 | `label_text`, `label_face` | `"VA1\|PKG-001\|Sakshi Menghani"`, `"-x side"` | debugging |
-| `box_center` | `{x, y, z, theta}` world mm, z = box top (same as `find_box`) | for `pick_box` (Python also gets `box_center_pose` as a `Pose`) |
+| `box_center` | `{x, y, z, theta}` world mm, z = box top (same as `find_box`) | **where the box is**, for `pick_box` (Python: `box_center_pose`) |
+| `drop_center` | `{x, y, z, theta}` world mm, z = box top once it rests in the zone | **where to put it**: the zone's saved, reach-checked drop point (Python: `drop_center_pose`). Use it like `box_center`: `find_pick.tip_target(drop_center_pose, h)` |
 | `box` | `{length_mm, width_mm, height_mm, yaw_deg}` | |
 | `say` | `"Package PKG-001 for Sakshi Menghani verified. Accepted."` | voice |
 | `inspection_dir` | `runs/inspect_<time>` | one photo per face + `contact.jpg` |
@@ -135,12 +136,25 @@ Every scan also stores its result in `inventory.db`, table `results`: `zone` (gr
 from inventory import next_to_place, mark_placed
 r = next_to_place()      # latest scanned box not yet placed, or None
 if r:
-    # r["zone"] == "green" / "orange", r["accepted"], r["box_center"] = {"x", "y", "z", "theta"}
+    # r["zone"] == "green" / "orange", r["accepted"]
+    # r["box_center"]  = {"x", "y", "z", "theta"}  where the box is (z = box top)
+    # r["drop_center"] = {"x", "y", "z"}           where to put it  (z = box top once it rests there)
     ...pick it up, put it in r["zone"]...
     mark_placed(r["result_id"])
 ```
 
 From another laptop: run `python label_api.py --host 0.0.0.0` on the robot laptop, then `GET http://<robot-laptop>:8000/next` and `POST /placed {"result_id": 7}`. CLI: `python inventory.py next`, `python inventory.py results`.
+
+### Drop zones (measured once, saved in `poses.json`)
+
+`zones.py` found the green and orange sheets with the camera (median of several views) and saved them as `green_zone` / `orange_zone`, plus a `drop_world` point per zone that the suction tip was **checked to reach** at drop height for both box sizes. No re-measuring per scan.
+
+| Zone | Center (world mm) | Drop point | Note |
+|---|---|---|---|
+| green (ACCEPTED) | (135.9, 494.7) | same | reachable at the center |
+| orange (REJECTED) | (481.2, 523.0) | (427.0, 464.1) | center is out of reach; drop point is 80 mm toward the arm (the sheet edge is ~156 mm from its center) |
+
+If a sheet is moved: `python zones.py --survey` then `python zones.py --check-drops` (both move the arm, no box), and commit `poses.json`. `python zones.py --show` prints them.
 
 ## Interfaces (agree on these first)
 

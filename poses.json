@@ -37,6 +37,92 @@
     "recorded_at": "2026-10-16T15:16:22",
     "view": "overview-blue"
   },
+  "green_zone": {
+    "center_spread_mm": 70.2,
+    "center_world": {
+      "x": 135.9,
+      "y": 494.7,
+      "z": -23.0
+    },
+    "corners_world": [
+      [
+        -76.7,
+        662.4
+      ],
+      [
+        304.5,
+        677.9
+      ],
+      [
+        308.4,
+        355.3
+      ],
+      [
+        -6.1,
+        337.0
+      ]
+    ],
+    "drop_world": {
+      "shift_toward_arm_mm": 0,
+      "x": 135.9,
+      "y": 494.7
+    },
+    "partial": false,
+    "recorded_at": "2026-10-16T17:12:37",
+    "seen_from_camera": [
+      250,
+      380,
+      460
+    ],
+    "size_mm": [
+      382,
+      313
+    ],
+    "views_used": 5
+  },
+  "orange_zone": {
+    "center_spread_mm": 12.1,
+    "center_world": {
+      "x": 481.2,
+      "y": 523.0,
+      "z": -23.0
+    },
+    "corners_world": [
+      [
+        709.5,
+        729.2
+      ],
+      [
+        642.9,
+        367.3
+      ],
+      [
+        326.1,
+        364.4
+      ],
+      [
+        310.3,
+        677.1
+      ]
+    ],
+    "drop_world": {
+      "shift_toward_arm_mm": 80,
+      "x": 427.0,
+      "y": 464.1
+    },
+    "partial": false,
+    "recorded_at": "2026-10-16T17:13:04",
+    "seen_from_camera": [
+      300,
+      300,
+      520
+    ],
+    "size_mm": [
+      403,
+      312
+    ],
+    "views_used": 4
+  },
   "overview-blue": {
     "camera_axes": {
       "origin": [

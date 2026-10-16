@@ -6,7 +6,8 @@
   python main.py --yes --loop  keep going until the blue zone is empty (max --max boxes)
 
 Pieces (connect once here, pass `machine` to everyone):
-  scan(machine)                       Sakshi  scan.py      -> result dict (see PLAN.md "Scan result")
+  scan(machine)                       Sakshi  scan.py      -> result dict (see PLAN.md "Scan result"):
+                                                  zone, accepted, box_center (where it is), drop_center (where it goes)
   pick_box(machine, box_center)       Yixin   find_pick.py
   place_box(machine, verified)        Yixin   place.py     (not written yet)
   notify_done(result)                 Yixin   place.py     (not written yet)
@@ -42,7 +43,7 @@ except ImportError:
 
 
 def show(result: dict) -> None:
-    printable = {k: v for k, v in result.items() if k != "box_center_pose"}
+    printable = {k: v for k, v in result.items() if not k.endswith("_pose")}  # Pose objects aren't JSON
     print(json.dumps(printable, indent=2))
     print(f"\n-> {result['status']}: {result['zone'].upper()} zone. {result['reason']}.")
 
@@ -67,8 +68,16 @@ async def handle_one_box(machine: RobotClient, dry_run: bool) -> dict | None:
               "Stopping before the pick.")
         return result
 
-    print(f"[main] picking the box -> {result['zone']} zone")
-    await find_pick.pick_box(machine, result["box_center_pose"])
+    # Re-check where the box is right before picking (the arm is back at overview after the scan; the
+    # inspection could have nudged the box). Falls back to the scan's position if it can't see it.
+    try:
+        box_center = await find_pick.find_box(machine, move=False)
+    except (LookupError, RuntimeError) as e:
+        print(f"[main] couldn't re-check the box position ({e}); using the scan's position")
+        box_center = result["box_center_pose"]
+    print(f"[main] picking the box -> {result['zone']} zone at "
+          f"x={result['drop_center']['x']} y={result['drop_center']['y']}")
+    await find_pick.pick_box(machine, box_center)
     if not await holding(machine):
         print("[main] the gripper is NOT holding the box after the pick. Releasing suction and stopping.")
         await Gripper.from_robot(machine, GRIPPER).open()

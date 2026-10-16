@@ -12,7 +12,7 @@ In main.py (connect once, pass machine):
         await place_box(machine, result["accepted"])         # Yixin: True -> green, False -> orange
         await notify_done(result)                            # Yixin: result["say"] for voice
 
-Result fields (JSON in runs/last_result.json; same dict in Python, plus "box_center_pose"):
+Result fields (JSON in runs/last_result.json; same dict in Python, plus "box_center_pose" / "drop_center_pose"):
     status        "ACCEPTED" | "REJECTED"
     zone          "green" | "orange"           where place_box should put it
     accepted      true | false                 the bool for place_box(machine, verified)
@@ -24,6 +24,8 @@ Result fields (JSON in runs/last_result.json; same dict in Python, plus "box_cen
     label_text    raw QR text, e.g. "VA1|PKG-001|Sakshi Menghani" | null
     label_face    "top" | "-x side" | ... | null   which face the label was read on
     box_center    {x, y, z, theta}             world mm; z = TOP of the box; theta = box yaw (deg); same as find_box()
+    drop_center   {x, y, z, theta}             where to put it: the zone's reach-checked drop point (zones.py),
+                                               z = top of the box once it rests there; theta 0 = keep the pick wrist
     box           {length_mm, width_mm, height_mm, yaw_deg}
     say           sentence for the voice announcement
     inspection_dir  runs/<folder> with one photo per face + contact.jpg
@@ -40,7 +42,9 @@ from viam.robot.client import RobotClient
 
 import find_pick
 from inspection import LAST_INSPECTION, RUNS, inspect_box
+from detect import TABLE_TOP_Z
 from inventory import record_detected, save_result, verify
+from zones import drop_center
 from robot import connect
 
 LAST_RESULT = RUNS / "last_result.json"
@@ -64,6 +68,8 @@ async def scan(machine: RobotClient) -> dict | None:
     r = verify(text, face=report.get("found_on"), no_label_reason=no_label_reason)
 
     box = report["box"]
+    # where the box goes: the saved, reach-checked drop point of its zone (zones.py); z = box top once it rests there
+    drop = drop_center(r.zone, box_center.z - TABLE_TOP_Z)
     result = {
         "status": r.status.value,
         "zone": r.zone,
@@ -75,6 +81,7 @@ async def scan(machine: RobotClient) -> dict | None:
         "label_face": report.get("found_on"),
         "box_center": {"x": round(box_center.x, 1), "y": round(box_center.y, 1), "z": round(box_center.z, 1),
                        "theta": round(box_center.theta, 1)},
+        "drop_center": {"x": round(drop.x, 1), "y": round(drop.y, 1), "z": round(drop.z, 1), "theta": 0.0},
         "box": {"length_mm": round(box["size_mm"][0], 1), "width_mm": round(box["size_mm"][1], 1),
                 "height_mm": round(box["size_mm"][2], 1), "yaw_deg": round(box["yaw_deg"], 1)},
         "say": r.say(),
@@ -83,7 +90,7 @@ async def scan(machine: RobotClient) -> dict | None:
     }
     result["result_id"] = save_result(result)  # the placing code reads it with inventory.next_to_place()
     LAST_RESULT.write_text(json.dumps(result, indent=2) + "\n")
-    return result | {"box_center_pose": box_center}
+    return result | {"box_center_pose": box_center, "drop_center_pose": drop}
 
 
 async def main():
@@ -95,6 +102,7 @@ async def main():
     if result is None:
         return
     result.pop("box_center_pose")
+    result.pop("drop_center_pose")
     print("\n" + json.dumps(result, indent=2))
     print(f"\n-> {result['status']}: put the box in the {result['zone'].upper()} zone. {result['reason']}.")
 
