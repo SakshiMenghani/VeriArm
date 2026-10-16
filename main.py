@@ -23,6 +23,7 @@ import json
 from viam.components.gripper import Gripper
 from viam.robot.client import RobotClient
 
+import announce
 import find_pick
 from inspection import go_to_overview
 from inventory import mark_placed
@@ -106,6 +107,7 @@ async def main():
 
     done = []
     async with await connect() as machine:
+        announce.intro()  # announcement 1 (see announce.py)
         for _ in range(args.max if args.loop else 1):
             result = await handle_one_box(machine, args.dry_run)
             if result is None:

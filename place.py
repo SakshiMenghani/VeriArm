@@ -15,6 +15,7 @@ from viam.components.gripper import Gripper
 from viam.proto.common import Pose
 from viam.robot.client import RobotClient
 
+import announce
 import find_pick
 from detect import TABLE_TOP_Z
 from find_pick import APPROACH_MM, move_tip, tip_target
@@ -36,6 +37,7 @@ async def place_box(machine: RobotClient, verified: bool, drop_center: Pose | No
         drop_center = zone_drop(zone, find_pick.BOX_H)
     box_h = drop_center.z - TABLE_TOP_Z
     print(f"[place] carrying the box to the {zone} zone (x={drop_center.x:.0f} y={drop_center.y:.0f})")
+    announce.moving_to(zone)  # announcement 5 (see announce.py)
 
     # tip_target(drop, h) puts the real tip h mm above where the box top will be when it rests there,
     # so the box bottom is h mm above the table.

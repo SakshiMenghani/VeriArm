@@ -40,6 +40,7 @@ from datetime import datetime
 
 from viam.robot.client import RobotClient
 
+import announce
 import find_pick
 from inspection import LAST_INSPECTION, RUNS, inspect_box
 from detect import TABLE_TOP_Z
@@ -60,12 +61,14 @@ async def scan(machine: RobotClient) -> dict | None:
     print(record_detected().say())
 
     text = await inspect_box(machine, box_center)  # 5 visible faces, no picking up
+    announce.label_read(text)  # announcement 3 (see announce.py)
     report = json.loads(LAST_INSPECTION.read_text())
 
     unreadable = [f["face"] for f in report["faces"] if f.get("qr_shapes") and not f.get("text")]
     no_label_reason = (f"Label seen on the {unreadable[0]} but could not be read" if unreadable
                        else "No label found")
     r = verify(text, face=report.get("found_on"), no_label_reason=no_label_reason)
+    announce.verification(r.accepted, r.reason)  # announcement 4 (see announce.py)
 
     box = report["box"]
     # where the box goes: the saved, reach-checked drop point of its zone (zones.py); z = box top once it rests there

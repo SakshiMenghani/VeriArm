@@ -27,6 +27,7 @@ from viam.robot.client import RobotClient
 from viam.services.motion import MotionClient
 
 from detect import KNOWN_BOXES, TABLE_TOP_Z, VIEW, BoxDetection, find_box_in_photo, live_images, save_debug_image
+import announce
 from poses import get_pose
 from robot import ARM, GRIPPER, MOTION, connect
 
@@ -116,11 +117,17 @@ async def find_box(machine: RobotClient, move: bool = True) -> Pose:
         # needs the camera exactly where it was when the pose was recorded.
         await Arm.from_robot(machine, ARM).move_to_joint_positions(JointPositions(values=get_pose(OVERVIEW)["joints"]))
     bgr, depth = await live_images(machine)
-    return _find_and_draw(bgr, depth)
+    try:
+        box_center, box_name = _find_and_draw(bgr, depth)
+    except LookupError as e:  # NoBoxError / ZoneBlockedError
+        announce.no_package(e)  # announcement 2 (see announce.py)
+        raise
+    announce.package_detected(box_name)  # announcement 2 (see announce.py)
+    return box_center
 
 
-def _find_and_draw(bgr, depth) -> Pose:
-    """Detect the box in a photo from overview-blue, save the picture, return box_center."""
+def _find_and_draw(bgr, depth) -> tuple[Pose, str]:
+    """Detect the box in a photo from overview-blue, save the picture, return (box_center, box name)."""
     try:
         box = find_box_in_photo(bgr, get_pose(VIEW), depth)
     except LookupError as e:
@@ -133,7 +140,7 @@ def _find_and_draw(bgr, depth) -> Pose:
           f"height {box.height_mm:.0f} mm (known{measured}), yaw {box.yaw_deg:.0f} deg")
     print(f"  box_center (world mm):  x={box_center.x:.1f}  y={box_center.y:.1f}  z={box_center.z:.1f}  "
           f"(z = top of the box: table {TABLE_TOP_Z:.0f} + {KNOWN_BOXES[box.name][2]:.0f} mm box height)")
-    return box_center
+    return box_center, box.name
 
 
 async def hover_over_box(machine: RobotClient, box_center: Pose) -> None:
