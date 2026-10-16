@@ -282,12 +282,14 @@ async def turn_box_around(machine: RobotClient, box_center: Pose) -> None:
     """Pick the box (Sandy's pick_box), turn it 180 deg about its center, put it back, release, back off."""
     await find_pick.pick_box(machine, box_center)
     turned = Pose(x=box_center.x, y=box_center.y, z=box_center.z, o_x=0, o_y=0, o_z=1,
-                  theta=wrap(box_center.theta + 180))
-    await find_pick.move_tip(machine, find_pick.tip_target(turned, find_pick.LIFT_MM), "turn the box 180 deg")
-    await find_pick.move_tip(machine, find_pick.tip_target(turned, PUT_DOWN_MM), "put the box down", straight_line=True)
+                  theta=wrap(box_center.theta + 180))  # box yaw after the turn
+    wrist = wrap(find_pick.overview_tip_theta() + 180)  # pick_box grips at the overview wrist angle; turn it 180
+    await find_pick.move_tip(machine, find_pick.tip_target(turned, find_pick.LIFT_MM, wrist), "turn the box 180 deg")
+    await find_pick.move_tip(machine, find_pick.tip_target(turned, PUT_DOWN_MM, wrist), "put the box down",
+                             straight_line=True)
     find_pick.confirm("turn suction OFF (box is on the table)")
     await Gripper.from_robot(machine, GRIPPER).open()
-    await find_pick.move_tip(machine, find_pick.tip_target(turned, find_pick.APPROACH_MM), "back off",
+    await find_pick.move_tip(machine, find_pick.tip_target(turned, find_pick.APPROACH_MM, wrist), "back off",
                              straight_line=True)
 
 

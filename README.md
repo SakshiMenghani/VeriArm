@@ -59,7 +59,7 @@ Box 'large': top 287 x 175 mm (measured), height 61 mm (known, camera saw 56), y
   box_center (world mm):  x=349.6  y=131.1  z=38.0  (z = top of the box: table -23 + 61 mm box height)
 ```
 
-- **`box_center`**: center of the box's footprint, in mm, in the world frame (same as the arm's base frame). This is exactly what `find_box()` returns. **`z` is the top of the box** (where the suction cup goes): the table top (−23) plus the known height of the detected box.
+- **`box_center`**: center of the box's footprint, in mm, in the world frame (same as the arm's base frame). This is exactly what `find_box()` returns. **`z` is the top of the box** (where the suction cup goes): the table top (−23) plus the known height of the detected box. **`theta` is the box's yaw** (same as the printed yaw), not a wrist angle.
 - **Size and yaw**: length/width are measured from the camera, so they include the box's end flaps (a bit bigger than 272 x 170). **Height is the known height** of the matched box (`KNOWN_BOXES`), not the camera's reading, which varies by ~5 mm; the camera's value is shown for reference (`measured_height_mm` in code). `yaw` is the direction of the long side, 0-180 deg.
 - To send the suction tip somewhere, remember the tip is **17 mm lower** than the robot thinks (see PLAN.md).
 
