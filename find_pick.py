@@ -1,4 +1,4 @@
-"""Sandy: find the box in the blue zone and pick it up with suction.
+"""Find the box in the blue zone (Sandy: find_box, locate) and pick it up (Yixin: pick_box).
 
 find_box() takes a live photo from overview-blue and finds the box anywhere in the blue zone.
 If the zone is blocked or there's no box, it raises an error instead of guessing.
@@ -7,11 +7,11 @@ Every motion asks for confirmation unless --yes is passed. Keep someone at the e
 
 Usage:
     python find_pick.py plan      # print the targets, no connection to the robot
-    python find_pick.py locate    # no motion: arm must be at overview; print box center + grip point
+    python find_pick.py locate    # no motion: arm must be at overview; print where the box is
     python find_pick.py locate --image reference/box-center.jpg   # same, offline from a saved photo
     python find_pick.py find      # move to overview, print box_center
     python find_pick.py hover     # put the suction tip 50 mm above the box top (hover test)
-    python find_pick.py pick      # pick the box: approach, lower, suction on, lift
+    python find_pick.py pick      # pick the box (Yixin's, untested draft): approach, lower, suction on, lift
     python find_pick.py release   # turn suction off
 """
 import argparse
@@ -25,7 +25,7 @@ from viam.proto.service.motion import Constraints, LinearConstraint
 from viam.robot.client import RobotClient
 from viam.services.motion import MotionClient
 
-from detect import KNOWN_BOXES, TABLE_TOP_Z, VIEW, BoxDetection, detect_box, find_box as find_box_in_photo
+from detect import KNOWN_BOXES, TABLE_TOP_Z, VIEW, BoxDetection, detect_box, find_box_in_photo
 from poses import get_pose
 from robot import ARM, GRIPPER, MOTION, connect
 
@@ -92,6 +92,7 @@ async def hover_over_box(machine: RobotClient, box_center: Pose) -> None:
 
 
 async def pick_box(machine: RobotClient, box_center: Pose) -> None:
+    """Yixin owns this. Untested draft: never run on a real box yet; change or replace freely."""
     gripper = Gripper.from_robot(machine, GRIPPER)
     await move_tip(machine, tip_target(box_center, APPROACH_MM), "approach above the box")
     await move_tip(machine, tip_target(box_center, -PRESS_MM), "lower onto the box top", straight_line=True)
@@ -106,27 +107,16 @@ async def release(machine: RobotClient) -> None:
     await Gripper.from_robot(machine, GRIPPER).open()
 
 
-def grip_point(box_center: Pose) -> Pose:
-    """Where to send the suction tip (motion service, world frame) to touch the box top at its center.
-    Includes the 17 mm correction and the small press for a seal."""
-    return tip_target(box_center, -PRESS_MM)
-
-
 def print_locate(box: BoxDetection) -> None:
-    """Print where the box is and where to grip it."""
-    theta = get_pose(OVERVIEW)["tip_world"]["theta"]
-    box_center = Pose(x=box.x, y=box.y, z=TABLE_TOP_Z, o_x=0, o_y=0, o_z=1, theta=theta)
-    grip = grip_point(box_center)
+    """Print where the box is (no grip decisions: that's pick_box's job)."""
     print(f"Box '{box.name}': {box.length_mm:.0f} x {box.width_mm:.0f} x {box.height_mm:.0f} mm (measured), "
           f"yaw {box.yaw_deg:.0f} deg")
-    print(f"  box_center (world mm):  x={box_center.x:.1f}  y={box_center.y:.1f}  z={box_center.z:.1f}  (z = table top)")
-    print(f"  box top surface:        x={box.x:.1f}  y={box.y:.1f}  z={TABLE_TOP_Z + BOX_H:.1f}")
-    print(f"  grip point (send tip):  x={grip.x:.1f}  y={grip.y:.1f}  z={grip.z:.1f}  "
-          f"(= box top + {SUCTION_Z_CORRECTION_MM:.0f} mm correction - {PRESS_MM:.0f} mm press), pointing straight down")
+    print(f"  box_center (world mm):  x={box.x:.1f}  y={box.y:.1f}  z={TABLE_TOP_Z:.1f}  (z = table top)")
+    print(f"  box top surface:        z={TABLE_TOP_Z + BOX_H:.1f}  (table top + {BOX_H:.0f} mm box height)")
 
 
 async def locate(machine: RobotClient) -> None:
-    """No motion: photograph from overview and print where the box is and where to grip it."""
+    """No motion: photograph from overview and print where the box is."""
     print_locate(await detect_box(machine))
 
 

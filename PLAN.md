@@ -48,18 +48,20 @@ The code always computes poses as `box_center + offset`. For the first version, 
 
 ## Team breakdown
 
-### Sandy — find and reach the box
-- `find_box() -> box_center`: move to `overview`, detect the box in the blue zone, return its position. Start hardcoded, then real detection.
-- `pick_box(box_center)`: lower onto the top, turn on suction, lift.
-- Shared setup: Viam machine config, camera-to-gripper offset (frame system), saved poses.
-- **Test:** hover the gripper over the point `find_box` returns and check it's within a couple of cm of the real center.
+### Sandy — find the box
+- `find_box(machine) -> box_center`: move to `overview-blue`, detect the box in the blue zone (by depth + size, `detect.KNOWN_BOXES`), return its position. Raises `NoBoxError` / `ZoneBlockedError` instead of guessing. **Done; live detection works.**
+- `python find_pick.py locate`: print where the box is without moving (arm at `overview-blue`, or `--image` on a saved photo).
+- Shared setup: frame system check, 17 mm tip offset, saved poses, `blue_zone`. **Done.**
+- **Test:** hover the gripper over the point `find_box` returns and check it's within a couple of cm of the real center. **Passed** (blue zone center).
+- Todo: test detection with the box off-center and rotated.
 
 ### Sakshi — inspect the box
 - `inspect_box(box_center) -> id | None`: build the 5 poses, visit each, try to decode a QR code, skip unreachable poses.
 - Bottom fallback: if nothing is found, call `pick_box`, show the bottom to the camera, try once more.
-- **Test:** hardcode `box_center`, put a box on the tape spot, run `inspect_box`.
+- **Test:** put the box in the blue zone, get `box_center` from `find_box` (or `python find_pick.py locate`), run `inspect_box`.
 
-### Yixin — sort the box and notify
+### Yixin — pick, sort the box, and notify
+- `pick_box(machine, box_center)`: work out the grip point, lower onto the top, turn on suction, lift. Starting point: the untested draft in `find_pick.py`. Inputs: `box_center` (x, y; z = table top), box height 61 mm, tip 17 mm lower than the config thinks, move the tip with the motion service (gripper as the component).
 - `place_box(verified: bool)`: carry the picked box to V or R, lower it, release suction, return to a safe pose.
 - `notify_done(result)`: send the "done" notification.
 - **Test:** jog the arm, pick a box with a manual suction command, test both drops and the notification.
@@ -75,7 +77,7 @@ The code always computes poses as `box_center + offset`. For the first version, 
 
   ```python
   async def find_box(machine) -> Pose                              # Sandy
-  async def pick_box(machine, box_center: Pose) -> None            # Sandy
+  async def pick_box(machine, box_center: Pose) -> None            # Yixin
   async def inspect_box(machine, box_center: Pose) -> str | None   # Sakshi
   async def verify(package_id: str | None) -> bool                 # TBD (no robot needed)
   async def place_box(machine, verified: bool) -> None             # Yixin
