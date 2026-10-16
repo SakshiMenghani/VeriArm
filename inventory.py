@@ -14,6 +14,8 @@ A package is ACCEPTED only if its id is in the inventory, the recipient on the l
   python inventory.py add PKG-007 "Recipient Name" [--unexpected]
   python inventory.py check "VA1|PKG-001|Sakshi Menghani"     run verify() on a label text
   python inventory.py scans             show the scan log
+  python inventory.py next              the next scanned box waiting to be placed (zone + box_center)
+  python inventory.py results           recent scan results and whether they were placed
 """
 import argparse
 import csv
@@ -76,6 +78,21 @@ def connect_db(path: Path = DB_FILE) -> sqlite3.Connection:
             recipient TEXT,
             reason    TEXT NOT NULL,
             face      TEXT
+        );
+        -- One row per scanned box: where it must go. Written by scan.py, read by the placing code.
+        CREATE TABLE IF NOT EXISTS results (
+            result_id  INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts         TEXT NOT NULL,
+            status     TEXT NOT NULL,     -- ACCEPTED / REJECTED
+            zone       TEXT NOT NULL,     -- green / orange: where to place the box
+            accepted   INTEGER NOT NULL,  -- 1 / 0: the bool for place_box(machine, verified)
+            package_id TEXT,
+            recipient  TEXT,
+            reason     TEXT NOT NULL,
+            label_face TEXT,
+            box_x REAL, box_y REAL, box_z REAL, box_theta REAL,  -- box_center: world mm, z = box top, theta = box yaw
+            say        TEXT,
+            placed_at  TEXT               -- NULL until the box has been put in its zone
         );
     """)
     cols = {r["name"] for r in db.execute("PRAGMA table_info(items)")}
@@ -211,12 +228,70 @@ def verify(label_text: str | None, db: sqlite3.Connection | None = None, face: s
             db.close()
 
 
+# ---------- results: handoff to the placing code ----------
+
+def _connect_or(db):
+    return (db, False) if db is not None else (connect_db(), True)
+
+
+def save_result(result: dict, db: sqlite3.Connection | None = None) -> int:
+    """Store a scan result (scan.py's dict). Returns its result_id."""
+    db, own = _connect_or(db)
+    try:
+        c = result["box_center"]
+        cur = db.execute(
+            "INSERT INTO results (ts, status, zone, accepted, package_id, recipient, reason, label_face, "
+            "box_x, box_y, box_z, box_theta, say) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (result.get("time") or datetime.now().isoformat(timespec="seconds"), result["status"], result["zone"],
+             1 if result["accepted"] else 0, result.get("package_id"), result.get("recipient"), result["reason"],
+             result.get("label_face"), c["x"], c["y"], c["z"], c["theta"], result.get("say")))
+        db.commit()
+        return cur.lastrowid
+    finally:
+        if own:
+            db.close()
+
+
+def _result_row_to_dict(row: sqlite3.Row) -> dict:
+    d = dict(row)
+    d["accepted"] = bool(d["accepted"])
+    d["box_center"] = {k: d.pop(f"box_{k}") for k in ("x", "y", "z", "theta")}
+    return d
+
+
+def next_to_place(db: sqlite3.Connection | None = None) -> dict | None:
+    """The most recent scanned box that hasn't been placed yet, or None.
+    Keys: result_id, zone ("green"/"orange"), accepted, box_center {x, y, z, theta}, status, reason,
+    package_id, recipient, label_face, say, ts. Older unplaced results are ignored (the box was rescanned)."""
+    db, own = _connect_or(db)
+    try:
+        row = db.execute("SELECT * FROM results ORDER BY result_id DESC LIMIT 1").fetchone()
+        return None if row is None or row["placed_at"] is not None else _result_row_to_dict(row)
+    finally:
+        if own:
+            db.close()
+
+
+def mark_placed(result_id: int, db: sqlite3.Connection | None = None) -> None:
+    """Call after the box has been put down in its zone."""
+    db, own = _connect_or(db)
+    try:
+        db.execute("UPDATE results SET placed_at = ? WHERE result_id = ?",
+                   (datetime.now().isoformat(timespec="seconds"), result_id))
+        db.commit()
+    finally:
+        if own:
+            db.close()
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="cmd", required=True)
     sub.add_parser("init")
     sub.add_parser("list")
     sub.add_parser("scans")
+    sub.add_parser("next")
+    sub.add_parser("results")
     a = sub.add_parser("add")
     a.add_argument("id")
     a.add_argument("recipient")
@@ -239,6 +314,18 @@ def main():
         r = verify(args.text, db)
         print(f"{r.status.value} -> {r.zone} zone: {r.reason}  (id={r.package_id}, recipient={r.recipient})")
         print("say:", r.say())
+    elif args.cmd == "next":
+        r = next_to_place(db)
+        if r is None:
+            print("Nothing waiting to be placed.")
+        else:
+            c = r["box_center"]
+            print(f"result {r['result_id']}: {r['status']} -> place in {r['zone'].upper()} zone  ({r['reason']})")
+            print(f"  box_center: x={c['x']} y={c['y']} z={c['z']} theta={c['theta']}   package={r['package_id']}")
+    elif args.cmd == "results":
+        for r in db.execute("SELECT * FROM results ORDER BY result_id DESC LIMIT 20"):
+            print(f"  #{r['result_id']:<3} {r['ts']}  {r['status']:8} -> {r['zone']:6}  {r['package_id'] or '-':10}"
+                  f"  placed: {r['placed_at'] or 'NO'}   {r['reason']}")
     elif args.cmd == "scans":
         for r in db.execute("SELECT * FROM scans ORDER BY rowid DESC LIMIT 30"):
             print(f"  {r['ts']}  {r['status']:8}  {r['id'] or '-':10} {r['recipient'] or '-':{MAX_NAME_LEN}}"

@@ -117,6 +117,21 @@ if result is not None:
 
 Known limit: a label on the side facing the wall is seen only at a steep angle and usually can't be read (→ REJECTED, "could not be read"). `inspection.py --turn` (pick, turn 180°, re-read) exists but is untested.
 
+### Reading the scan result from the database (for the placing code)
+
+Every scan also stores its result in `inventory.db`, table `results`: `zone` (green/orange), `accepted`, `box_center` (x, y, z = box top, theta = box yaw), `status`, `reason`, `package_id`, `recipient`, `placed_at` (empty until placed).
+
+```python
+from inventory import next_to_place, mark_placed
+r = next_to_place()      # latest scanned box not yet placed, or None
+if r:
+    # r["zone"] == "green" / "orange", r["accepted"], r["box_center"] = {"x", "y", "z", "theta"}
+    ...pick it up, put it in r["zone"]...
+    mark_placed(r["result_id"])
+```
+
+From another laptop: run `python label_api.py --host 0.0.0.0` on the robot laptop, then `GET http://<robot-laptop>:8000/next` and `POST /placed {"result_id": 7}`. CLI: `python inventory.py next`, `python inventory.py results`.
+
 ## Interfaces (agree on these first)
 
 - `box_center`: a `Pose` in **mm**, in the **arm's base frame** (same as Viam's world frame). x, y = center of the box; **z = the TOP of the box** (table top −23 + the detected box's known height; +38 mm for the current box). The table top is always z = −23. *(Changed Oct 16: z used to be the table top. If you wrote `box_center.z + 61`, drop the `+ 61`.)* **`box_center.theta` = the box's yaw** (direction of its long side, 0–180°), not a wrist angle. For the wrist rotation when moving the suction tip, `find_pick.tip_target(..., tip_theta=...)` defaults to the overview's wrist angle.

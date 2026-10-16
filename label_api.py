@@ -12,6 +12,9 @@ Endpoints:
   POST /items      {"id","recipient","expected"?}   add/replace a package -> its label text + links
   POST /verify     {"text": "VA1|PKG-001|Sakshi Menghani"}   run verify() -> status JSON (logged like a real scan)
   GET  /scans                             last 50 scan log entries as JSON
+  GET  /next                              next scanned box to place: zone (green/orange) + box_center, or null
+  POST /placed     {"result_id": 7}        mark that box as placed
+  GET  /results                           recent scan results (placed or not)
 """
 import argparse
 import html
@@ -24,7 +27,8 @@ from urllib.parse import parse_qs, quote, urlparse
 import cv2
 from PIL import Image
 
-from inventory import (MAX_NAME_LEN, add_item, all_items, connect_db, get_item, make_label_text, verify)
+from inventory import (MAX_NAME_LEN, add_item, all_items, connect_db, get_item, make_label_text, mark_placed,
+                       next_to_place, verify)
 from make_labels import DPI, TEST_CASES, build_pdf, make_label, qr_image
 
 QR_PX = 400  # PNG size for /qr
@@ -139,6 +143,12 @@ class Handler(BaseHTTPRequestHandler):
             if parts == ["items"]:
                 return self._json([dict(r) | {"label": make_label_text(r["id"], r["recipient"])} for r in all_items(db)])
 
+            if parts == ["next"]:
+                return self._json({"next": next_to_place(db)})
+
+            if parts == ["results"]:
+                return self._json([dict(r) for r in db.execute("SELECT * FROM results ORDER BY result_id DESC LIMIT 50")])
+
             if parts == ["scans"]:
                 return self._json([dict(r) for r in db.execute("SELECT * FROM scans ORDER BY rowid DESC LIMIT 50")])
 
@@ -162,6 +172,13 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"id": pid, "recipient": recipient, "expected": expected, "label": text,
                                    "qr": f"/qr/{quote(pid)}", "label_png": f"/label/{quote(pid)}",
                                    "pdf": f"/labels.pdf?ids={quote(pid)}"}, 201)
+
+            if parts == ["placed"]:
+                rid = body.get("result_id")
+                if not isinstance(rid, int):
+                    return self._error("need {\"result_id\": <int>}")
+                mark_placed(rid, db)
+                return self._json({"result_id": rid, "placed": True})
 
             if parts == ["verify"]:
                 r = verify(body.get("text"), db, face=body.get("face"))

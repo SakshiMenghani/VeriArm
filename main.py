@@ -24,6 +24,7 @@ from viam.robot.client import RobotClient
 
 import find_pick
 from inspection import go_to_overview
+from inventory import mark_placed
 from robot import GRIPPER, connect
 from scan import scan
 
@@ -75,6 +76,7 @@ async def handle_one_box(machine: RobotClient, dry_run: bool) -> dict | None:
         raise SystemExit("Pick failed.")
 
     await place_box(machine, result["accepted"])
+    mark_placed(result["result_id"])
     await notify_done(result)
     return result
 

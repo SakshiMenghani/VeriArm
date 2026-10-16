@@ -27,6 +27,8 @@ Result fields (JSON in runs/last_result.json; same dict in Python, plus "box_cen
     box           {length_mm, width_mm, height_mm, yaw_deg}
     say           sentence for the voice announcement
     inspection_dir  runs/<folder> with one photo per face + contact.jpg
+    result_id     row in inventory.db "results"; inventory.next_to_place() returns the latest unplaced one,
+                  inventory.mark_placed(result_id) after the box is put down
     time          ISO timestamp
 """
 import argparse
@@ -38,7 +40,7 @@ from viam.robot.client import RobotClient
 
 import find_pick
 from inspection import LAST_INSPECTION, RUNS, inspect_box
-from inventory import record_detected, verify
+from inventory import record_detected, save_result, verify
 from robot import connect
 
 LAST_RESULT = RUNS / "last_result.json"
@@ -79,6 +81,7 @@ async def scan(machine: RobotClient) -> dict | None:
         "inspection_dir": f"runs/{report['dir']}",
         "time": datetime.now().isoformat(timespec="seconds"),
     }
+    result["result_id"] = save_result(result)  # the placing code reads it with inventory.next_to_place()
     LAST_RESULT.write_text(json.dumps(result, indent=2) + "\n")
     return result | {"box_center_pose": box_center}
 
