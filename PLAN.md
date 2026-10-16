@@ -68,6 +68,10 @@ Measured on Oct 16 with the real box: top and three sides are reachable at the f
 - `notify_done(result)`: send the "done" notification.
 - **Test:** jog the arm, pick a box with a manual suction command, test both drops and the notification.
 
+### Control panel (Sakshi)
+- `python ui.py` → http://localhost:8080 (`--host 0.0.0.0` to open it from another laptop). **Start: one box** = `main.py --yes`, **until blue zone is empty** = `--loop`, **Scan only** = `--dry-run`. Shows the steps (find → read label → verify → pick → place → done), the live log, the latest result (green/orange card, package, recipient, reason, face photos) and the history from `inventory.db`.
+- **Stop** ends the run and sends `arm.stop()`. It does not turn the suction off (a carried box isn't dropped). The physical e-stop is still the real safety.
+
 ### main.py (Sakshi)
 - **Working end to end on the robot (Oct 16):** PKG-001 / Sakshi Menghani → ACCEPTED → picked, carried, placed in green (result #7); PKG-001 / Wrong Person (tall box) → REJECTED → placed in orange (result #8).
 - `place.py`: `place_box(machine, verified, drop_center)` carries the held box at 10 cm clearance, lowers it straight down to 1 cm above the zone, releases, backs off, returns to overview. `notify_done(result)` prints `result["say"]` (voice can go there). `python place.py --test-pick` / `--test-lift` are the grip checks used to debug the suction.
