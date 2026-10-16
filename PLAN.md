@@ -69,7 +69,7 @@ Measured on Oct 16 with the real box: top and three sides are reachable at the f
 - **Test:** jog the arm, pick a box with a manual suction command, test both drops and the notification.
 
 ### main.py (Sakshi)
-- Connects once, then: `scan(machine)` → `pick_box(machine, result["box_center_pose"])` → `place_box(machine, result["accepted"])` → `notify_done(result)`. `--loop` repeats until the blue zone is empty.
+- Connects once, then: `scan(machine)` → re-check the box position with `find_box(machine, move=False)` (the arm is back at overview after the scan) → `pick_box(machine, box_center)` → `place_box(machine, result["accepted"])` → `notify_done(result)`. `--loop` repeats until the blue zone is empty.
 - **Yixin: put `place_box(machine, verified)` and `notify_done(result)` in `place.py`.** `main.py` imports them from there automatically. Until `place.py` exists, `main.py` scans and stops **before** picking (the arm never holds a box with nowhere to put it); `notify_done` falls back to printing `result["say"]`.
 - If the gripper isn't holding the box after `pick_box`, it releases suction, goes back to overview and stops.
 - `python main.py --dry-run` (scan only), `python main.py --yes` (one box), `python main.py --yes --loop`.
@@ -100,6 +100,16 @@ if result is not None:
     await pick_box(machine, result["box_center_pose"])   # Yixin; same Pose find_box() returns
     await place_box(machine, result["accepted"])         # True -> green, False -> orange
     await notify_done(result)                            # result["say"] for voice
+```
+
+**Suggested: re-check the box right before picking.** `result["box_center_pose"]` comes from the photo `find_box` took at the *start* of the scan. Nothing re-measures it after inspection, and inspection spends a while with the arm close to the box (side views). If the box gets nudged in that time, `pick_box` goes to the old spot. Inspection ends with the arm back at `overview-blue`, so a fresh photo there costs ~2 s and no motion:
+
+```python
+result = await scan(machine)
+if result is not None:
+    box_center = await find_box(machine, move=False)   # re-check: raises NoBoxError if the box is gone
+    await pick_box(machine, box_center)
+    ...
 ```
 
 | Field | Example | Use |
@@ -181,7 +191,7 @@ From another laptop: run `python label_api.py --host 0.0.0.0` on the robot lapto
 - **Box height: use the known height, not the measured one.** The depth camera's box height varies by ~5 mm between photos (56–61 mm for the same box). Detection uses the measurement only to recognize which box it is; `BoxDetection.height_mm` and `box_center.z` both use the known height from `KNOWN_BOXES`, so pick, inspection and place all agree. The raw reading is `BoxDetection.measured_height_mm`.
 - **Use the point cloud for depth, not the depth image.** The camera's `depth` image has its own (wider) field of view and doesn't line up with the color image; the point cloud has exactly one point per color pixel. `detect.live_images()` handles this.
 - **Box:** 272 × 170 × 61 mm (10.7 × 6.7 × 2.4 in; the camera measures ~290 × 177 × 56 including the end flaps). It nearly fills the blue zone: only ~2.5 cm of blue on each side when centered, so it may hang over an edge. Box sizes live in `detect.KNOWN_BOXES`.
-- **Box `tall`:** 234 × 165 × 140 mm (ruler). The camera sees ~244 × 173 × **154**: the taped top may bulge ~14 mm in the middle (to confirm by measuring the height at the center). Its top center is on a **strip of silver duct tape**, a suction risk: test the seal there, or grip beside the tape. `box_center.z` = 117 for this box.
+- **Box `tall`:** 234 × 165 × 140 mm (ruler). The camera sees ~244 × 173 × **154**. Re-measured: the box is flat and really 140 mm tall, so the **depth camera reads ~14 mm too high when the box top is this close (~37 cm from the lens)**; for `large` (top ~47 cm away) it's accurate. Trust the known height (the code does). Much taller boxes may read even further off: raise `overview-blue` or widen `HEIGHT_TOLERANCE_MM` if they stop being recognized. **Hover test on `tall` passed:** tip commanded 50 mm above the known 140 mm top, measured gap 4.5 cm (the camera's 154 would have given ~3.6). So the ruler height is right, and the 17 mm tip correction is good to about ±5 mm (the first hover test was +1 mm, this one −5 mm). With `PRESS_MM = 10`, the real press is ~5–15 mm. Also: even with a straight-line move, the wrist (last joint) turned ~175° on the way down; the hose was fine, but passing a wrist angle close to the current one would avoid it. Its top center is on a **strip of silver duct tape**, a suction risk: test the seal there, or grip beside the tape. `box_center.z` = 117 for this box.
 - **Inspection poses need rethinking for this box:** a "front" pose 25 cm from the center is only ~11 cm from the long side, and `box_h/2` is ~3 cm above the table (still too low for the wrist camera).
 
 ## Saved poses (`poses.json`, record with `python record_pose.py <name>`)
