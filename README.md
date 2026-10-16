@@ -9,11 +9,15 @@ says the result out loud, and moves the box to ACCEPT / REJECT / REVIEW.
 
 ## Setup
 
+Needs **Python 3.10+** (we use 3.12). With [uv](https://docs.astral.sh/uv/):
+
 ```bash
-python3 -m venv .venv
+uv venv --python 3.12 .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+uv pip install -r requirements.txt
 ```
+
+(Or `python3.12 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt`.)
 
 Create `.env` (git-ignored) with the machine credentials from the Viam app's CONNECT tab:
 
@@ -25,10 +29,10 @@ VIAM_API_KEY_ID=...
 
 ## Scripts
 
-- `robot.py`: shared `connect()` helper that reads `.env`
+- `robot.py`: shared `connect()` helper that reads `.env`, plus component name constants (`ARM`, `GRIPPER`, `CAMERA`, `MOTION`)
 - `connect_test.py`: read-only smoke test (lists resources, reads arm pose, saves camera frames to `captures/`)
 
 ## Machine resources
 
-- `arm`, `gripper`, `cam` (color + depth), `builtin` motion service
+- `arm`, `vacuum_gripper-1`, `cam` (wrist camera, color + depth), `audio_in-1` (microphone), `builtin` motion service, `discovery-1`
 - `table`, `wall-front`, `wall-side`, `ceiling`: obstacle geometry for the motion planner, not real grippers

@@ -1,1 +1,1 @@
-viam-sdk
+viam-sdk  # needs Python 3.10+ (team uses 3.12)

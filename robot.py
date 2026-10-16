@@ -4,6 +4,12 @@ from pathlib import Path
 
 from viam.robot.client import RobotClient
 
+# Component names as configured in the Viam app. Update here if someone renames them.
+ARM = "arm"
+GRIPPER = "vacuum_gripper-1"
+CAMERA = "cam"
+MOTION = "builtin"
+
 
 def _load_env(path: Path = Path(__file__).parent / ".env") -> None:
     if not path.exists():
