@@ -23,17 +23,15 @@ from viam.proto.service.motion import Constraints, LinearConstraint
 from viam.robot.client import RobotClient
 from viam.services.motion import MotionClient
 
-from detect import detect_box
+from detect import KNOWN_BOXES, TABLE_TOP_Z, detect_box
 from poses import get_pose
 from robot import ARM, GRIPPER, MOTION, connect
 
 OVERVIEW = "overview-blue"
 
-# Box is a fixed size (mm).
-BOX_L, BOX_W, BOX_H = 107.0, 67.0, 24.0
-
-# Table top in the config's world frame, from check_frames.py.
-TABLE_TOP_Z = -23.0
+# The box we demo with (detect.KNOWN_BOXES). TODO when we use several sizes: take the
+# height from the detection instead of this constant.
+BOX_L, BOX_W, BOX_H = KNOWN_BOXES["large"]
 
 # The real suction tip is ~17 mm lower than the config thinks (measured twice by hand,
 # see PLAN.md). Aim this much higher so the real tip lands where we mean.
@@ -107,9 +105,11 @@ async def release(machine: RobotClient) -> None:
 
 
 def print_plan() -> None:
-    spot = get_pose("tape_spot")["tip_world"]
-    box_center = Pose(x=spot["x"], y=spot["y"], z=TABLE_TOP_Z, theta=spot["theta"])
-    print(f"box_center: x={box_center.x:.1f} y={box_center.y:.1f} z={box_center.z:.1f} (table top)")
+    zone = get_pose("blue_zone")["center_world"]
+    theta = get_pose(OVERVIEW)["tip_world"]["theta"]
+    box_center = Pose(x=zone["x"], y=zone["y"], z=TABLE_TOP_Z, theta=theta)
+    print(f"Example: box at the blue zone center x={box_center.x:.1f} y={box_center.y:.1f}, "
+          f"box {BOX_L:.0f} x {BOX_W:.0f} x {BOX_H:.0f} mm")
     print(f"box top (real): z={TABLE_TOP_Z + BOX_H:.1f}")
     for label, h in (("approach", APPROACH_MM), ("contact", -PRESS_MM), ("lift", LIFT_MM)):
         t = tip_target(box_center, h)

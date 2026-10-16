@@ -1,4 +1,42 @@
 {
+  "blue_zone": {
+    "center_world": {
+      "x": 348.609,
+      "y": 115.888,
+      "z": -23.0
+    },
+    "corners_world": [
+      [
+        500.2,
+        285.9
+      ],
+      [
+        517.5,
+        -37.0
+      ],
+      [
+        197.1,
+        -54.1
+      ],
+      [
+        179.8,
+        268.7
+      ]
+    ],
+    "pixel_rect": [
+      [
+        675.42,
+        369.44
+      ],
+      [
+        552.03,
+        556.24
+      ],
+      -85.263
+    ],
+    "recorded_at": "2026-10-16T15:16:22",
+    "view": "overview-blue"
+  },
   "overview-blue": {
     "camera_axes": {
       "origin": [
@@ -56,20 +94,6 @@
       "x": 427.46,
       "y": 123.216,
       "z": 392.666
-    }
-  },
-  "tape_spot": {
-    "joints": null,
-    "recorded_at": "2026-10-16T14:32:50",
-    "source": "blue zone center computed from the overview-blue photo",
-    "tip_world": {
-      "o_x": 0.0,
-      "o_y": 0.0,
-      "o_z": -1.0,
-      "theta": -6.408,
-      "x": 348.609,
-      "y": 115.888,
-      "z": -23.0
     }
   }
 }
