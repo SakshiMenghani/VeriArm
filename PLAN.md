@@ -68,8 +68,11 @@ Measured on Oct 16 with the real box: top and three sides are reachable at the f
 - `notify_done(result)`: send the "done" notification.
 - **Test:** jog the arm, pick a box with a manual suction command, test both drops and the notification.
 
-### Not assigned yet
-- `main.py`: calls the pieces in order (`scan.py` + `pick_box` + `place_box` + `notify_done`).
+### main.py (Sakshi)
+- Connects once, then: `scan(machine)` → `pick_box(machine, result["box_center_pose"])` → `place_box(machine, result["accepted"])` → `notify_done(result)`. `--loop` repeats until the blue zone is empty.
+- **Yixin: put `place_box(machine, verified)` and `notify_done(result)` in `place.py`.** `main.py` imports them from there automatically. Until `place.py` exists, `main.py` scans and stops **before** picking (the arm never holds a box with nowhere to put it); `notify_done` falls back to printing `result["say"]`.
+- If the gripper isn't holding the box after `pick_box`, it releases suction, goes back to overview and stops.
+- `python main.py --dry-run` (scan only), `python main.py --yes` (one box), `python main.py --yes --loop`.
 
 ## Labels & inventory
 

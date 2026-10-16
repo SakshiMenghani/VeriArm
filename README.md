@@ -36,6 +36,7 @@ VIAM_API_KEY_ID=...
 - `inventory.py`: inventory database (SQLite, seeded from `inventory_seed.csv`) and `verify()`. `python inventory.py init` first.
 - `make_labels.py`: printable QR label PDF from the inventory → `labels/labels.pdf`
 - `label_api.py`: HTTP API + web page for live QR generation (package id + recipient), adding packages, label PDFs, verify (http://localhost:8000)
+- `main.py`: the whole cycle: scan → pick → place in green/orange → announce. `--dry-run` scans only; `--yes --loop` runs until the blue zone is empty. Stops before picking until Yixin's `place.py` exists.
 - `poses.py`: load saved poses in code, e.g. `get_pose("v_place")["joints"]` or `dict_to_pose(get_pose("v_place")["tip_world"])`
 - `find_pick.py`: `find_box()` (Sandy), `pick_box()` (Yixin). `python find_pick.py find` finds the box (see below); `plan` prints pick targets without the robot; `hover`, `pick`, `release` move the arm and ask before each motion. `pick` opens suction, approaches and lowers the tip to the box top, grabs, reports the holding sensor status, and lifts regardless of that status.
 - `detect.py`: the vision code behind `find_box` (box detection by depth + size, `KNOWN_BOXES`, pixel → table). As a script it's for setup only: `--save-zone` re-records the blue zone (zone empty, arm at `overview-blue`); `--save-photo NAME` keeps a test photo + depth in `reference/`.
