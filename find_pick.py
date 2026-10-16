@@ -1,7 +1,7 @@
 """Sandy: find the box in the blue zone and pick it up with suction.
 
-MVP: box_center is the saved "tape_spot" pose (hardcoded spot on the table).
-Later: find_box() detects the box from the overview photo instead.
+MVP: box_center is the blue zone center, detected from a live overview photo each run
+(falls back to the saved "tape_spot"). Later: find_box() detects the box itself.
 
 Every motion asks for confirmation unless --yes is passed. Keep someone at the e-stop.
 
@@ -23,6 +23,7 @@ from viam.proto.service.motion import Constraints, LinearConstraint
 from viam.robot.client import RobotClient
 from viam.services.motion import MotionClient
 
+from detect import detect_blue_center
 from poses import get_pose
 from robot import ARM, GRIPPER, MOTION, connect
 
@@ -80,7 +81,15 @@ async def find_box(machine: RobotClient) -> Pose:
     confirm(f"move to {OVERVIEW} (joint move)")
     await Arm.from_robot(machine, ARM).move_to_joint_positions(JointPositions(values=get_pose(OVERVIEW)["joints"]))
     spot = get_pose("tape_spot")["tip_world"]
-    return Pose(x=spot["x"], y=spot["y"], z=TABLE_TOP_Z, o_x=0, o_y=0, o_z=1, theta=spot["theta"])
+    # MVP: the box sits at the blue zone center, measured from a live photo each run.
+    # Later: detect the box itself instead of the zone.
+    try:
+        x, y = await detect_blue_center(machine)
+        print(f"Live detection: blue zone center x={x:.1f} y={y:.1f}")
+    except (LookupError, RuntimeError) as e:
+        x, y = spot["x"], spot["y"]
+        print(f"Live detection failed ({e}); using saved tape_spot x={x:.1f} y={y:.1f}")
+    return Pose(x=x, y=y, z=TABLE_TOP_Z, o_x=0, o_y=0, o_z=1, theta=spot["theta"])
 
 
 async def hover_over_box(machine: RobotClient, box_center: Pose) -> None:
