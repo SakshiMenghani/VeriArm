@@ -69,7 +69,7 @@ Measured on Oct 16 with the real box: top and three sides are reachable at the f
 - **Test:** jog the arm, pick a box with a manual suction command, test both drops and the notification.
 
 ### Not assigned yet
-- `main.py`: calls the pieces in order (`scan.py` + `pick_box` + `place_box` + `notify_done`).
+- `main.py`: calls the pieces in order (`scan.py` + `pick_box` + `place_box` + `notify_done`). Suggested: re-check the box position with `find_box(machine, move=False)` right before `pick_box` (see "Scan result" below).
 
 ## Labels & inventory
 
@@ -97,6 +97,16 @@ if result is not None:
     await pick_box(machine, result["box_center_pose"])   # Yixin; same Pose find_box() returns
     await place_box(machine, result["accepted"])         # True -> green, False -> orange
     await notify_done(result)                            # result["say"] for voice
+```
+
+**Suggested: re-check the box right before picking.** `result["box_center_pose"]` comes from the photo `find_box` took at the *start* of the scan. Nothing re-measures it after inspection, and inspection spends a while with the arm close to the box (side views). If the box gets nudged in that time, `pick_box` goes to the old spot. Inspection ends with the arm back at `overview-blue`, so a fresh photo there costs ~2 s and no motion:
+
+```python
+result = await scan(machine)
+if result is not None:
+    box_center = await find_box(machine, move=False)   # re-check: raises NoBoxError if the box is gone
+    await pick_box(machine, box_center)
+    ...
 ```
 
 | Field | Example | Use |
