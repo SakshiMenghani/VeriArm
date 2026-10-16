@@ -70,7 +70,7 @@ The code always computes poses as `box_center + offset`. For the first version, 
 
 ## Interfaces (agree on these first)
 
-- `box_center`: a `Pose` in **mm**, in the **arm's base frame** (same as Viam's world frame). x, y = center of the box's footprint; **z = table top, i.e. the box's bottom** (−23 mm). The box top is `box_center.z + 24`.
+- `box_center`: a `Pose` in **mm**, in the **arm's base frame** (same as Viam's world frame). x, y = center of the box's footprint; **z = table top, i.e. the box's bottom** (−23 mm). The box top is `box_center.z + 61`.
 - Function signatures:
 
   ```python
@@ -113,14 +113,16 @@ The code always computes poses as `box_center + offset`. For the first version, 
 - Arm base = world origin, so "arm base frame" and "world frame" are the same. The camera is attached to the arm with a calibrated offset. Run `python check_frames.py` to see where everything is (read-only).
 - **Blue zone:** a ~322 mm square, center at x = 348.6, y = 115.9 mm (world). Spans x 180–518, y −54–286. Its far edge is only ~4 cm from the front wall obstacle (x ≈ 558), so inspection poses on that side (the "back" pose at center + 25 cm in x) are **inside the wall**: use a shorter offset or look down at an angle.
 - **Pixel → table works.** `detect.py` turns any pixel from the `overview-blue` photo into a table position. Hover test passed: the tip went to the computed blue zone center and was over the real center, within a centimetre.
-- **Box:** 107 × 67 × 24 mm.
+- **Use the point cloud for depth, not the depth image.** The camera's `depth` image has its own (wider) field of view and doesn't line up with the color image; the point cloud has exactly one point per color pixel. `detect.live_images()` handles this.
+- **Box:** 272 × 170 × 61 mm (10.7 × 6.7 × 2.4 in; the camera measures ~290 × 177 × 56 including the end flaps). It nearly fills the blue zone: only ~2.5 cm of blue on each side when centered, so it may hang over an edge. Box sizes live in `detect.KNOWN_BOXES`; we may add more sizes later.
+- **Inspection poses need rethinking for this box:** a "front" pose 25 cm from the center is only ~11 cm from the long side, and `box_h/2` is ~3 cm above the table (still too low for the wrist camera).
 
 ## Saved poses (`poses.json`, record with `python record_pose.py <name>`)
 
 | Name | What | Status |
 |---|---|---|
 | `overview-blue` | camera 526 mm above the table, looking straight down at the whole blue zone | recorded |
-| `tape_spot` | blue zone center (computed from the photo, not jogged) | recorded |
-| `v_place` / `r_place` | above the green / orange zone, room for the box underneath | **todo** (zones were moved; record at their new spots) |
+| `blue_zone` | the blue zone's position in the `overview-blue` photo and on the table (center x = 348.6, y = 115.9). Saved from a photo of the empty zone with `python detect.py --save-zone`; not an arm pose | recorded |
+| `v_place` / `r_place` | above the green / orange zone, room for the 61 mm box underneath | **todo** (zones were moved; record at their new spots, and they must fit a 27 × 17 cm box) |
 
 **Move to saved poses by joint angles**, not by tip pose: the planner can reach the same tip pose with a different arm posture (it picked one at a joint limit once, and the arm stopped with "Joint Angle Exceeds Limit").
