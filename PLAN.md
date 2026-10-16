@@ -95,3 +95,9 @@ The code always computes poses as `box_center + offset`. For the first version, 
 - **Reachability:** can the arm reach the "back" inspection pose without hitting the box or table? Keep the blue zone well inside the arm's range.
 - **Calibration:** errors in the pixel-to-table conversion carry into every inspection pose. Test with the hover check above.
 - **Suction:** the cup may lose grip on a crinkly label or tape seam. Keep the top surface flat and clear.
+
+## Calibration notes (measured Oct 16)
+
+- **Suction tip is ~17 mm lower than the config thinks.** Measured twice with a ruler at two arm heights (config 158 → real 140 mm, config 167 → real 150 mm above the table). The error is constant. Until it's measured precisely and fixed in the config, aim the tip **17 mm higher** in code whenever it approaches the box or table (`pick_box`, `place_box`). Not yet known whether the cause is the gripper length (config says 126 mm) or the table height (config says top at z = −23 mm), probably some of both.
+- **Move the suction tip, not the arm.** `arm.move_to_position()` positions the arm flange, which is 126 mm above the tip. To put the tip somewhere, use the motion service with the gripper (`robot.GRIPPER`) as the component to move. It also plans around the table and walls.
+- Arm base = world origin, so "arm base frame" and "world frame" are the same. The camera is attached to the arm with a calibrated offset. Run `python check_frames.py` to see where everything is (read-only).
