@@ -13,6 +13,12 @@
     "z": 38.0,
     "theta": 93.4
   },
+  "drop_center": {
+    "x": 427.0,
+    "y": 464.1,
+    "z": 38.0,
+    "theta": 0.0
+  },
   "box": {
     "length_mm": 286.8,
     "width_mm": 178.2,
@@ -21,5 +27,6 @@
   },
   "say": "Package PKG-999 for Unknown Person rejected. Not in inventory.",
   "inspection_dir": "runs/inspect_20261016-161500",
-  "time": "2026-10-16T16:15:00"
+  "time": "2026-10-16T16:15:00",
+  "result_id": 4
 }

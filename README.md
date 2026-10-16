@@ -33,9 +33,11 @@ VIAM_API_KEY_ID=...
 - `connect_test.py`: read-only smoke test (lists resources, reads arm pose, saves camera frames to `captures/`)
 - `check_frames.py`: read-only frame system report (what each part is attached to, offsets, obstacles, where the camera and suction tip are now)
 - `record_pose.py <name>`: save where the arm is now as a named pose in `poses.json` (read-only; refuses if the arm is moving). `--list` shows saved poses, `--force` overwrites.
-- `inventory.py`: inventory database (SQLite, seeded from `inventory_seed.csv`) and `verify()`. `python inventory.py init` first.
+- `inventory.py`: inventory database (SQLite, seeded from `inventory_seed.csv`) and `verify()`. Loads the seed automatically on first use; `python inventory.py init` reloads it after editing the CSV.
 - `make_labels.py`: printable QR label PDF from the inventory → `labels/labels.pdf`
 - `label_api.py`: HTTP API + web page for live QR generation (package id + recipient), adding packages, label PDFs, verify (http://localhost:8000)
+- `zones.py`: the green/orange drop zones (measured once with the camera, saved in `poses.json` with a reach-checked drop point). `--show` prints them; `--survey` / `--check-drops` re-measure if a sheet moves.
+- `main.py`: the whole cycle: scan → pick → place in green/orange → announce. `--dry-run` scans only; `--yes --loop` runs until the blue zone is empty. Stops before picking until Yixin's `place.py` exists.
 - `scan.py`: `scan(machine)` = find → inspect 5 faces → verify; returns the result for pick/place and writes `runs/last_result.json` (local, not in git). Format examples: `examples/scan_result_*.json`.
 - `inspection.py`: `inspect_box()` reads the QR label from the box's visible faces; `--plan`, `--decode` run without motion.
 - `poses.py`: load saved poses in code, e.g. `get_pose("v_place")["joints"]` or `dict_to_pose(get_pose("v_place")["tip_world"])`
