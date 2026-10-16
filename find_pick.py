@@ -25,7 +25,8 @@ from viam.proto.service.motion import Constraints, LinearConstraint
 from viam.robot.client import RobotClient
 from viam.services.motion import MotionClient
 
-from detect import KNOWN_BOXES, TABLE_TOP_Z, VIEW, BoxDetection, detect_box, find_box_in_photo
+from detect import (KNOWN_BOXES, TABLE_TOP_Z, VIEW, BoxDetection, find_box_in_photo, live_images,
+                    save_debug_image)
 from poses import get_pose
 from robot import ARM, GRIPPER, MOTION, connect
 
@@ -87,7 +88,7 @@ async def find_box(machine: RobotClient) -> Pose:
     # needs the camera exactly where it was when the pose was recorded.
     confirm(f"move to {OVERVIEW} (joint move)")
     await Arm.from_robot(machine, ARM).move_to_joint_positions(JointPositions(values=get_pose(OVERVIEW)["joints"]))
-    box = await detect_box(machine)  # raises ZoneBlockedError / NoBoxError: don't guess, let the caller decide
+    box = await _detect_and_draw(machine)  # raises ZoneBlockedError / NoBoxError: don't guess, let the caller decide
     print(f"Box found: x={box.x:.1f} y={box.y:.1f}, {box.length_mm:.0f} x {box.width_mm:.0f} mm, yaw {box.yaw_deg:.0f} deg")
     return box_center_from(box)
 
@@ -122,9 +123,34 @@ def print_locate(box: BoxDetection) -> None:
           f"(z = top of the box: table {TABLE_TOP_Z:.0f} + {KNOWN_BOXES[box.name][2]:.0f} mm box height)")
 
 
+async def _detect_and_draw(machine: RobotClient) -> BoxDetection:
+    """Photograph from overview (no motion) and find the box. Saves captures/detection.jpg."""
+    bgr, depth = await live_images(machine)
+    try:
+        box = find_box_in_photo(bgr, get_pose(VIEW), depth)
+    except LookupError as e:
+        save_debug_image(bgr, None, f"{type(e).__name__}: {e}"[:90], open_it=False)
+        raise
+    save_debug_image(bgr, box, open_it=False)
+    return box
+
+
 async def locate(machine: RobotClient) -> None:
-    """No motion: photograph from overview and print where the box is."""
-    print_locate(await detect_box(machine))
+    """No motion: photograph from overview and print where the box is. Opens the picture."""
+    try:
+        print_locate(await _detect_and_draw(machine))
+    finally:
+        _open_picture()
+
+
+def _open_picture() -> None:
+    import subprocess
+    import sys
+    from detect import DEBUG_IMAGE
+    opener = {"darwin": ["open"], "linux": ["xdg-open"]}.get(sys.platform)
+    if opener and DEBUG_IMAGE.exists():
+        subprocess.run(opener + [str(DEBUG_IMAGE)], check=False)
+    print(f"Picture: {DEBUG_IMAGE}  (pink = blue zone, yellow = box, red = center)")
 
 
 def print_plan() -> None:
@@ -157,10 +183,14 @@ async def main():
         from pathlib import Path
         depth_file = Path(args.image).with_suffix(".npy")
         depth = np.load(depth_file) if depth_file.exists() else None
+        bgr = cv2.imread(args.image)
         try:
-            print_locate(find_box_in_photo(cv2.imread(args.image), get_pose(VIEW), depth))
+            box = find_box_in_photo(bgr, get_pose(VIEW), depth)
         except LookupError as e:
+            save_debug_image(bgr, None, f"{type(e).__name__}: {e}"[:90])
             raise SystemExit(f"{type(e).__name__}: {e}")
+        print_locate(box)
+        print(f"Picture: {save_debug_image(bgr, box)}  (pink = blue zone, yellow = box, red = center)")
         return
 
     async with await connect() as machine:

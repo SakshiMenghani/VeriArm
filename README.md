@@ -57,6 +57,8 @@ Box 'large': 290 x 177 x 56 mm (measured), yaw 93 deg
 - **Size and yaw**: measured from the camera, so they include the box's end flaps (a bit bigger than 272 x 170 x 61). `yaw` is the direction of the long side, 0-180 deg.
 - To send the suction tip somewhere, remember the tip is **17 mm lower** than the robot thinks (see PLAN.md).
 
+Each run also saves and opens a picture, `captures/detection.jpg`: **pink** = the blue zone, **yellow** = the detected box, **red cross** = the center it returns. Use it to check the detection by eye.
+
 If it can't give an answer, it says why and does nothing:
 
 | Message | Meaning | Fix |
