@@ -1,0 +1,25 @@
+{
+  "status": "ACCEPTED",
+  "zone": "green",
+  "accepted": true,
+  "reason": "Matches inventory",
+  "package_id": "PKG-001",
+  "recipient": "Sakshi Menghani",
+  "label_text": "VA1|PKG-001|Sakshi Menghani",
+  "label_face": "top",
+  "box_center": {
+    "x": 421.1,
+    "y": 135.7,
+    "z": 38.0,
+    "theta": 93.4
+  },
+  "box": {
+    "length_mm": 286.8,
+    "width_mm": 178.2,
+    "height_mm": 61.0,
+    "yaw_deg": 93.4
+  },
+  "say": "Package PKG-001 for Sakshi Menghani verified. Accepted.",
+  "inspection_dir": "runs/inspect_20261016-160210",
+  "time": "2026-10-16T16:02:16"
+}

@@ -8,7 +8,8 @@ Label format (what the QR code encodes):  VA1|<package id>|<recipient>   e.g.  V
   - Keep recipient names short (<= 24 chars): longer text = denser QR = harder to read from the arm camera.
 A package is ACCEPTED only if its id is in the inventory, the recipient on the label matches, and it's expected.
 
-  python inventory.py init              (re)create inventory.db from inventory_seed.csv
+  python inventory.py init              reload inventory.db from inventory_seed.csv (also happens
+                                        automatically the first time, when the db is empty)
   python inventory.py list              show packages
   python inventory.py add PKG-007 "Recipient Name" [--unexpected]
   python inventory.py check "VA1|PKG-001|Sakshi Menghani"     run verify() on a label text
@@ -80,9 +81,14 @@ def connect_db(path: Path = DB_FILE) -> sqlite3.Connection:
     cols = {r["name"] for r in db.execute("PRAGMA table_info(items)")}
     scan_cols = {r["name"] for r in db.execute("PRAGMA table_info(scans)")}
     if not {"status", "recipient"} <= cols or not {"status", "recipient"} <= scan_cols:
-        db.close()  # db from an older version: rebuild (it's local; re-run `init` to reload the seed)
+        db.close()  # db from an older version: rebuild (it's local)
         path.unlink()
         return connect_db(path)
+    # inventory.db is not in git: on a fresh clone it starts empty, which would REJECT every label as
+    # "Not in inventory". Load the committed seed automatically the first time.
+    if db.execute("SELECT COUNT(*) FROM items").fetchone()[0] == 0 and SEED_FILE.exists():
+        n = init_from_seed(db)
+        print(f"[inventory] {path.name} was empty: loaded {n} packages from {SEED_FILE.name}")
     return db
 
 
