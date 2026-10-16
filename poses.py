@@ -8,6 +8,7 @@ from datetime import datetime
 from pathlib import Path
 
 from viam.components.arm import Arm
+from viam.components.camera import Camera
 from viam.proto.common import Pose, PoseInFrame
 from viam.robot.client import RobotClient
 
@@ -50,12 +51,33 @@ async def _world_pose(machine: RobotClient, frame: str) -> Pose:
     return result.pose
 
 
+async def camera_axes(machine: RobotClient) -> dict:
+    """The camera frame's x, y, z axes as unit vectors in the world frame.
+    Computed by Viam's own transform, so no orientation-vector math on our side."""
+    async def point(x, y, z):
+        p = (await machine.transform_pose(
+            PoseInFrame(reference_frame=CAMERA, pose=Pose(x=x, y=y, z=z, o_z=1)), "world")).pose
+        return (p.x, p.y, p.z)
+
+    origin = await point(0, 0, 0)
+    axes = {}
+    for name, xyz in (("x", (1000, 0, 0)), ("y", (0, 1000, 0)), ("z", (0, 0, 1000))):
+        tip = await point(*xyz)
+        axes[name] = [round((t - o) / 1000, 6) for t, o in zip(tip, origin)]
+    return {"origin": [round(v, 3) for v in origin], **axes}
+
+
 async def capture_current_pose(machine: RobotClient) -> dict:
     """Read where the arm is now. Read-only."""
     joints = await Arm.from_robot(machine, ARM).get_joint_positions()
+    intr = (await Camera.from_robot(machine, CAMERA).get_properties()).intrinsic_parameters
     return {
         "joints": [round(v, 3) for v in joints.values],
         "tip_world": pose_to_dict(await _world_pose(machine, GRIPPER)),
         "camera_world": pose_to_dict(await _world_pose(machine, CAMERA)),
+        "camera_axes": await camera_axes(machine),
+        "camera_intrinsics": {"fx": intr.focal_x_px, "fy": intr.focal_y_px,
+                              "cx": intr.center_x_px, "cy": intr.center_y_px,
+                              "width": intr.width_px, "height": intr.height_px},
         "recorded_at": datetime.now().isoformat(timespec="seconds"),
     }

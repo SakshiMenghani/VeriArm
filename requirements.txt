@@ -1,1 +1,3 @@
 viam-sdk  # needs Python 3.10+ (team uses 3.12)
+opencv-python-headless
+numpy

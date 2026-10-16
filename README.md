@@ -35,6 +35,7 @@ VIAM_API_KEY_ID=...
 - `record_pose.py <name>`: save where the arm is now as a named pose in `poses.json` (read-only; refuses if the arm is moving). `--list` shows saved poses, `--force` overwrites.
 - `poses.py`: load saved poses in code, e.g. `get_pose("v_place")["joints"]` or `dict_to_pose(get_pose("v_place")["tip_world"])`
 - `find_pick.py`: `find_box()` / `pick_box()` (Sandy). Needs saved poses `overview-blue` and `tape_spot`. `python find_pick.py plan` prints targets without the robot; `find`, `hover`, `pick`, `release` move it and ask before each motion.
+- `detect.py`: find the blue zone in a photo and convert pixels to table positions (needs a pose recorded with camera data, e.g. `overview-blue`). Runs offline on `reference/overview-blue.jpg`; `--live` takes a fresh photo; `--save-tape-spot` saves the zone center as `tape_spot`.
 
 ## Machine resources
 
