@@ -13,8 +13,8 @@ Pieces (connect once here, pass `machine` to everyone):
   notify_done(result)                 place.py     announce (prints result["say"] for now)
 
 Safety: if place_box doesn't exist yet, main.py stops after scanning and never picks the box up
-(the arm must never be left holding a box with nowhere to put it). If the pick doesn't hold the box,
-it releases suction, goes back to overview and stops.
+(the arm must never be left holding a box with nowhere to put it). If the pick doesn't hold the box (checked with
+the wrist camera, see grip_check.py), it releases suction, goes back to overview and stops.
 """
 import argparse
 import asyncio
@@ -49,10 +49,6 @@ def show(result: dict) -> None:
     print(f"\n-> {result['status']}: {result['zone'].upper()} zone. {result['reason']}.")
 
 
-async def holding(machine: RobotClient) -> bool:
-    return (await Gripper.from_robot(machine, GRIPPER).is_holding_something()).is_holding_something
-
-
 async def handle_one_box(machine: RobotClient, dry_run: bool) -> dict | None:
     """Scan one box and (unless dry_run / place_box missing) move it to its zone.
     Returns the scan result, or None if the blue zone is empty."""
@@ -82,11 +78,6 @@ async def handle_one_box(machine: RobotClient, dry_run: bool) -> dict | None:
         await find_pick.pick_box(machine, box_center)
     except find_pick.PickFailedError as e:
         print(f"[main] pick failed: {e}")
-        await go_to_overview(machine)
-        raise SystemExit("Pick failed.")
-    if not await holding(machine):
-        print("[main] the gripper is NOT holding the box after the pick. Releasing suction and stopping.")
-        await Gripper.from_robot(machine, GRIPPER).open()
         await go_to_overview(machine)
         raise SystemExit("Pick failed.")
 
