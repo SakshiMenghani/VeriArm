@@ -98,6 +98,19 @@ The code always computes poses as `box_center + offset`. For the first version, 
 
 ## Calibration notes (measured Oct 16)
 
-- **Suction tip is ~17 mm lower than the config thinks.** Measured twice with a ruler at two arm heights (config 158 → real 140 mm, config 167 → real 150 mm above the table). The error is constant. Until it's measured precisely and fixed in the config, aim the tip **17 mm higher** in code whenever it approaches the box or table (`pick_box`, `place_box`). Not yet known whether the cause is the gripper length (config says 126 mm) or the table height (config says top at z = −23 mm), probably some of both.
+- **Suction tip is 17 mm lower than the config thinks. Confirmed.** Measured with a ruler at two arm heights (config 158 → real 140 mm, config 167 → real 150 mm), then confirmed by the hover test: predicted 7.4 cm with the correction, measured 7.5 cm. Aim the tip **17 mm higher** in code whenever it approaches the box or table (`find_pick.SUCTION_Z_CORRECTION_MM`). The depth camera agrees with the configured table height within ~5 mm, so the cause is most likely the **gripper length** (config says 126 mm, real ≈ 143 mm). Fixing it in the gripper config would let us drop the correction; that's a team decision.
 - **Move the suction tip, not the arm.** `arm.move_to_position()` positions the arm flange, which is 126 mm above the tip. To put the tip somewhere, use the motion service with the gripper (`robot.GRIPPER`) as the component to move. It also plans around the table and walls.
 - Arm base = world origin, so "arm base frame" and "world frame" are the same. The camera is attached to the arm with a calibrated offset. Run `python check_frames.py` to see where everything is (read-only).
+- **Blue zone:** a ~322 mm square, center at x = 348.6, y = 115.9 mm (world). Spans x 180–518, y −54–286. Its far edge is only ~4 cm from the front wall obstacle (x ≈ 558), so inspection poses on that side (the "back" pose at center + 25 cm in x) are **inside the wall**: use a shorter offset or look down at an angle.
+- **Pixel → table works.** `detect.py` turns any pixel from the `overview-blue` photo into a table position. Hover test passed: the tip went to the computed blue zone center and was over the real center, within a centimetre.
+- **Box:** 107 × 67 × 24 mm.
+
+## Saved poses (`poses.json`, record with `python record_pose.py <name>`)
+
+| Name | What | Status |
+|---|---|---|
+| `overview-blue` | camera 526 mm above the table, looking straight down at the whole blue zone | recorded |
+| `tape_spot` | blue zone center (computed from the photo, not jogged) | recorded |
+| `v_place` / `r_place` | above the green / orange zone, room for the box underneath | **todo** (zones were moved; record at their new spots) |
+
+**Move to saved poses by joint angles**, not by tip pose: the planner can reach the same tip pose with a different arm posture (it picked one at a joint limit once, and the arm stopped with "Joint Angle Exceeds Limit").
