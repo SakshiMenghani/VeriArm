@@ -3,3 +3,6 @@
 __pycache__/
 captures/
 .DS_Store
+runs/
+inventory.db
+labels/*.pdf

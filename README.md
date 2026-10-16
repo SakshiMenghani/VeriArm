@@ -5,7 +5,7 @@
 Viam Robot Hackathon "Code That Moves" (Oct 16–17, 2026).
 
 The robot reads a package label with the arm camera, checks it against the expected inventory,
-says the result out loud, and moves the box to ACCEPT / REJECT / REVIEW.
+says the result out loud, and moves the box from the blue zone (DETECTED) to green (ACCEPTED) or orange (REJECTED).
 
 ## Setup
 
@@ -33,6 +33,9 @@ VIAM_API_KEY_ID=...
 - `connect_test.py`: read-only smoke test (lists resources, reads arm pose, saves camera frames to `captures/`)
 - `check_frames.py`: read-only frame system report (what each part is attached to, offsets, obstacles, where the camera and suction tip are now)
 - `record_pose.py <name>`: save where the arm is now as a named pose in `poses.json` (read-only; refuses if the arm is moving). `--list` shows saved poses, `--force` overwrites.
+- `inventory.py`: inventory database (SQLite, seeded from `inventory_seed.csv`) and `verify()`. `python inventory.py init` first.
+- `make_labels.py`: printable QR label PDF from the inventory → `labels/labels.pdf`
+- `label_api.py`: HTTP API + web page for live QR generation (package id + recipient), adding packages, label PDFs, verify (http://localhost:8000)
 - `poses.py`: load saved poses in code, e.g. `get_pose("v_place")["joints"]` or `dict_to_pose(get_pose("v_place")["tip_world"])`
 - `find_pick.py`: `find_box()` + `locate` (Sandy), `pick_box()` (Yixin, untested draft). `find_box()` takes a live photo from `overview-blue` and finds the box anywhere in the blue zone; raises `ZoneBlockedError` / `NoBoxError` instead of guessing. `python find_pick.py plan` prints targets without the robot; `locate` (no motion, arm at `overview-blue`; or `--image PATH` offline) prints where the box is; `find`, `hover`, `pick`, `release` move it and ask before each motion.
 - `detect.py`: find a known box (`KNOWN_BOXES`) in or slightly over the blue zone, by height (point-cloud depth) and size; convert pixels to table positions. `python detect.py` runs live (arm at `overview-blue`); `--save-zone` saves the empty zone's position as `blue_zone`; `--save-photo NAME` keeps the photo + depth in `reference/`; `--image PATH` runs offline.
