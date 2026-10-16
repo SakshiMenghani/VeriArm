@@ -33,12 +33,14 @@ KNOWN_BOXES = {
     "large": (272.0, 170.0, 61.0),  # 10.7 x 6.7 x 2.4 in
     "tall": (234.0, 165.0, 140.0),  # ruler; camera reads ~154 tall: depth is ~14 mm short this close (~37 cm)
 }
-# TEMPORARY, for trying new boxes: VERIARM_UNKNOWN_BOXES=1 also accepts a box that matches no known size,
-# using the camera's MEASURED size and height (±5 mm normally; up to ~15 mm too high for tall boxes close
-# to the camera). Once it works, add the box to KNOWN_BOXES with ruler numbers and turn this off.
-ALLOW_UNKNOWN_BOXES = os.environ.get("VERIARM_UNKNOWN_BOXES", "0") == "1"
+# Boxes not in KNOWN_BOXES: known boxes always win; if nothing matches, the biggest box-like, fully
+# visible object is accepted as "unknown", with the camera's MEASURED size and height (±5 mm normally; up to
+# ~15 mm too high for tall boxes close to the camera, which can make the suction stop short).
+# For the most reliable picks, add a box you'll use often to KNOWN_BOXES with ruler numbers.
+# Strict mode (known boxes only): VERIARM_UNKNOWN_BOXES=0.
+ALLOW_UNKNOWN_BOXES = os.environ.get("VERIARM_UNKNOWN_BOXES", "1") != "0"
 UNKNOWN_SIDE_MM = (50.0, 330.0)      # min / max side length of an unknown box
-UNKNOWN_HEIGHT_MM = (20.0, 250.0)    # min / max height
+UNKNOWN_HEIGHT_MM = (30.0, 250.0)    # min / max height; 30 mm keeps closed laptops, notebooks, phones out
 UNKNOWN_MIN_FILL = 0.85              # outline must fill its rectangle this well: boxes do, hands don't
 
 SIZE_TOLERANCE_MM = 30.0     # length / width
@@ -248,7 +250,7 @@ def find_box_in_photo(bgr: np.ndarray, view: dict, depth: np.ndarray | None = No
 
     detail = f" (saw objects: {'; '.join(seen)}; known boxes: " + ", ".join(
         f"{n} {l:.0f} x {w:.0f} x {h:.0f}" for n, (l, w, h) in KNOWN_BOXES.items()) + ")" if seen else ""
-    raise NoBoxError(f"no known box in the blue zone{detail}")
+    raise NoBoxError(f"no {'' if ALLOW_UNKNOWN_BOXES else 'known '}box in the blue zone{detail}")
 
 
 # ---------- picture for humans ----------

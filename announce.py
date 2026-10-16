@@ -53,7 +53,10 @@ def intro() -> None:
 
 def package_detected(box_name: str) -> None:
     """2. find_pick.find_box(): a known box was found in the blue zone."""
-    speak_once(f"Package detected: the {box_name} box.", key="zone")
+    if box_name == "unknown":
+        speak_once("Package detected: an unknown box, using measured size.", key="zone")
+    else:
+        speak_once(f"Package detected: the {box_name} box.", key="zone")
 
 
 def no_package(error: Exception | None = None) -> None:
@@ -224,6 +227,7 @@ def play_script() -> None:
     """Every announcement once, in flow order (no robot)."""
     intro()
     package_detected("large")
+    package_detected("unknown")
     label_read("VA1|PKG-001|Sakshi Menghani")
     verification(True)
     moving_to("green")
