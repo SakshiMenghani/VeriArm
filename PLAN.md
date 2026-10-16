@@ -50,7 +50,7 @@ The code always computes poses as `box_center + offset`. For the first version, 
 
 ### Sandy — find the box
 - `find_box(machine) -> box_center`: move to `overview-blue`, detect the box in the blue zone (by depth + size, `detect.KNOWN_BOXES`), return its position. Raises `NoBoxError` / `ZoneBlockedError` instead of guessing. **Done; live detection works.**
-- `python find_pick.py locate`: print where the box is without moving (arm at `overview-blue`, or `--image` on a saved photo).
+- `python find_pick.py find`: find the box from the terminal (`--no-move` to stay put, `--image` for a saved photo). Opens a picture of the detection.
 - Shared setup: frame system check, 17 mm tip offset, saved poses, `blue_zone`. **Done.**
 - **Test:** hover the gripper over the point `find_box` returns and check it's within a couple of cm of the real center. **Passed** (blue zone center).
 - Todo: test detection with the box off-center and rotated.
@@ -58,7 +58,7 @@ The code always computes poses as `box_center + offset`. For the first version, 
 ### Sakshi — inspect the box
 - `inspect_box(box_center) -> id | None`: build the 5 poses, visit each, try to decode a QR code, skip unreachable poses.
 - Bottom fallback: if nothing is found, call `pick_box`, show the bottom to the camera, try once more.
-- **Test:** put the box in the blue zone, get `box_center` from `find_box` (or `python find_pick.py locate`), run `inspect_box`.
+- **Test:** put the box in the blue zone, get `box_center` from `find_box` (or `python find_pick.py find --no-move`), run `inspect_box`.
 
 ### Yixin — pick, sort the box, and notify
 - `pick_box(machine, box_center)`: work out the grip point, lower onto the top, turn on suction, lift. Starting point: the untested draft in `find_pick.py`. Inputs: `box_center` (x, y = box center; **z = top of the box**, so aim the suction cup at `box_center.z` directly), tip 17 mm lower than the config thinks, move the tip with the motion service (gripper as the component).

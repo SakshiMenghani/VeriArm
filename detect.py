@@ -7,13 +7,10 @@ The blue zone's position is saved once (as "blue_zone" in poses.json) from a pho
 empty zone. The box is then found by height (depth camera) inside that area, and matched
 against the known box sizes, so any color of box works and hands or flat paper are ignored.
 
-Usage:
-    python detect.py                     # live photo (arm at overview-blue): find the box
-    python detect.py --save-zone         # live photo of the EMPTY zone: save its position as "blue_zone"
-    python detect.py --save-photo NAME   # also keep the photo (+ depth) in reference/ for offline tests
-    python detect.py --image PATH        # offline, on a saved photo (uses PATH's .npy depth if present)
-
-Every run saves and opens captures/detection.jpg: pink = blue zone, yellow = box, red cross = center.
+Setup commands (to find the box, use `python find_pick.py find`):
+    python detect.py --save-zone           # arm at overview-blue, zone EMPTY: save its position as "blue_zone"
+    python detect.py --save-photo NAME     # arm at overview-blue: keep the photo (+ depth) in reference/ for tests
+    python detect.py --save-zone --image PATH   # save the zone from a saved photo of the empty zone
 """
 import argparse
 import asyncio
@@ -312,17 +309,16 @@ async def _live_main() -> tuple:
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--image", help="use this photo (taken from overview-blue), no robot")
     parser.add_argument("--save-zone", action="store_true", help="save the (empty) zone's position as blue_zone")
     parser.add_argument("--save-photo", metavar="NAME", help="keep the live photo as reference/NAME.jpg (+ .npy depth)")
-    parser.add_argument("--no-picture", action="store_true", help="don't save/open captures/detection.jpg")
+    parser.add_argument("--image", help="--save-zone only: use this saved photo instead of a live one")
     args = parser.parse_args()
+    if not (args.save_zone or args.save_photo):
+        parser.error("nothing to do: use --save-zone and/or --save-photo NAME (to find the box: python find_pick.py find)")
 
     view = get_pose(VIEW)
     if args.image:
         bgr = cv2.imread(args.image)
-        depth_file = Path(args.image).with_suffix(".npy")
-        depth = np.load(depth_file) if depth_file.exists() else None
     else:
         bgr, depth = asyncio.run(_live_main())
         if args.save_photo:
@@ -340,19 +336,6 @@ def main():
         save_zone(rect, view)
         z = load_poses()["blue_zone"]["center_world"]
         print(f"Saved blue_zone: center x={z['x']:.1f} y={z['y']:.1f}. Commit poses.json so the team gets it.")
-        return
-
-    print(f"Depth: {'yes' if depth is not None else 'no (color fallback)'}")
-    box, message = None, ""
-    try:
-        box = find_box_in_photo(bgr, view, depth)
-        print(f"Box '{box.name}': center x={box.x:.1f}  y={box.y:.1f}, top {box.length_mm:.0f} x {box.width_mm:.0f} mm, "
-              f"{box.height_mm:.0f} mm tall, yaw {box.yaw_deg:.0f} deg")
-    except LookupError as e:
-        message = f"{type(e).__name__}: {e}"
-        print(message)
-    if not args.no_picture:
-        print(f"Picture: {save_debug_image(bgr, box, message[:90])}  (pink = blue zone, yellow = box, red = center)")
 
 
 if __name__ == "__main__":
