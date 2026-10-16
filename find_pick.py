@@ -7,6 +7,7 @@ Every motion asks for confirmation unless --yes is passed. Keep someone at the e
 
 Usage:
     python find_pick.py plan      # print the targets, no connection to the robot
+    python find_pick.py locate    # no motion: arm must be at overview; print box center + grip point
     python find_pick.py find      # move to overview, print box_center
     python find_pick.py hover     # put the suction tip 50 mm above the box top (hover test)
     python find_pick.py pick      # pick the box: approach, lower, suction on, lift
@@ -104,6 +105,26 @@ async def release(machine: RobotClient) -> None:
     await Gripper.from_robot(machine, GRIPPER).open()
 
 
+def grip_point(box_center: Pose) -> Pose:
+    """Where to send the suction tip (motion service, world frame) to touch the box top at its center.
+    Includes the 17 mm correction and the small press for a seal."""
+    return tip_target(box_center, -PRESS_MM)
+
+
+async def locate(machine: RobotClient) -> None:
+    """No motion: photograph from overview and print where the box is and where to grip it."""
+    box = await detect_box(machine)
+    theta = get_pose(OVERVIEW)["tip_world"]["theta"]
+    box_center = Pose(x=box.x, y=box.y, z=TABLE_TOP_Z, o_x=0, o_y=0, o_z=1, theta=theta)
+    grip = grip_point(box_center)
+    print(f"Box '{box.name}': {box.length_mm:.0f} x {box.width_mm:.0f} x {box.height_mm:.0f} mm (measured), "
+          f"yaw {box.yaw_deg:.0f} deg")
+    print(f"  box_center (world mm):  x={box_center.x:.1f}  y={box_center.y:.1f}  z={box_center.z:.1f}  (z = table top)")
+    print(f"  box top surface:        x={box.x:.1f}  y={box.y:.1f}  z={TABLE_TOP_Z + BOX_H:.1f}")
+    print(f"  grip point (send tip):  x={grip.x:.1f}  y={grip.y:.1f}  z={grip.z:.1f}  "
+          f"(= box top + {SUCTION_Z_CORRECTION_MM:.0f} mm correction - {PRESS_MM:.0f} mm press), pointing straight down")
+
+
 def print_plan() -> None:
     zone = get_pose("blue_zone")["center_world"]
     theta = get_pose(OVERVIEW)["tip_world"]["theta"]
@@ -119,7 +140,7 @@ def print_plan() -> None:
 async def main():
     global ASK_BEFORE_MOVING
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("action", choices=["plan", "find", "hover", "pick", "release"])
+    parser.add_argument("action", choices=["plan", "locate", "find", "hover", "pick", "release"])
     parser.add_argument("--yes", action="store_true", help="don't ask before each motion")
     args = parser.parse_args()
     ASK_BEFORE_MOVING = not args.yes
@@ -131,6 +152,12 @@ async def main():
     async with await connect() as machine:
         if args.action == "release":
             await release(machine)
+            return
+        if args.action == "locate":
+            try:
+                await locate(machine)
+            except (LookupError, RuntimeError) as e:  # NoBoxError, ZoneBlockedError, NotAtViewError
+                raise SystemExit(f"{type(e).__name__}: {e}")
             return
         try:
             box_center = await find_box(machine)
