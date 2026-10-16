@@ -30,7 +30,7 @@ TABLE_TOP_Z = -23.0  # world frame, from check_frames.py (depth camera agrees wi
 # Known boxes: name -> (length, width, height) in mm. Add new sizes here.
 KNOWN_BOXES = {
     "large": (272.0, 170.0, 61.0),  # 10.7 x 6.7 x 2.4 in
-    "tall": (234.0, 165.0, 140.0),  # ruler; camera sees ~244 x 173 x 154 (taped top may bulge)
+    "tall": (234.0, 165.0, 140.0),  # ruler; camera reads ~154 tall: depth is ~14 mm short this close (~37 cm)
 }
 SIZE_TOLERANCE_MM = 30.0     # length / width
 HEIGHT_TOLERANCE_MM = 25.0     # depth reads up to ~15 mm off (bulging tops); our boxes differ by ~80 mm
