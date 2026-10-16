@@ -9,8 +9,8 @@ Pieces (connect once here, pass `machine` to everyone):
   scan(machine)                       Sakshi  scan.py      -> result dict (see PLAN.md "Scan result"):
                                                   zone, accepted, box_center (where it is), drop_center (where it goes)
   pick_box(machine, box_center)       Yixin   find_pick.py
-  place_box(machine, verified)        Yixin   place.py     (not written yet)
-  notify_done(result)                 Yixin   place.py     (not written yet)
+  place_box(machine, verified, drop)  place.py     carry to result["drop_center_pose"], set down, release
+  notify_done(result)                 place.py     announce (prints result["say"] for now)
 
 Safety: if place_box doesn't exist yet, main.py stops after scanning and never picks the box up
 (the arm must never be left holding a box with nowhere to put it). If the pick doesn't hold the box,
@@ -77,14 +77,19 @@ async def handle_one_box(machine: RobotClient, dry_run: bool) -> dict | None:
         box_center = result["box_center_pose"]
     print(f"[main] picking the box -> {result['zone']} zone at "
           f"x={result['drop_center']['x']} y={result['drop_center']['y']}")
-    await find_pick.pick_box(machine, box_center)
+    try:
+        await find_pick.pick_box(machine, box_center)
+    except find_pick.PickFailedError as e:
+        print(f"[main] pick failed: {e}")
+        await go_to_overview(machine)
+        raise SystemExit("Pick failed.")
     if not await holding(machine):
         print("[main] the gripper is NOT holding the box after the pick. Releasing suction and stopping.")
         await Gripper.from_robot(machine, GRIPPER).open()
         await go_to_overview(machine)
         raise SystemExit("Pick failed.")
 
-    await place_box(machine, result["accepted"])
+    await place_box(machine, result["accepted"], result["drop_center_pose"])
     mark_placed(result["result_id"])
     await notify_done(result)
     return result

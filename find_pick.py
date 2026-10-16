@@ -38,7 +38,22 @@ BOX_L, BOX_W, BOX_H = KNOWN_BOXES["large"]
 
 # The real suction tip is ~17 mm lower than the config thinks (measured twice by hand,
 # see PLAN.md). Aim this much higher so the real tip lands where we mean.
-SUCTION_Z_CORRECTION_MM = 17.0
+SUCTION_Z_CORRECTION_MM = 17.0  # default, for box heights not measured below
+
+# Measured per box with the hover test (tip commanded 30 / 50 mm above the box top, real gap by ruler):
+#   large (61 mm): real gap 35 mm vs 30 -> tip 5 mm too high with 17 -> 12   (Oct 16, Sakshi)
+#   tall (140 mm): real gap 45 mm vs 50 -> tip 5 mm too low  with 17 -> 22   (Oct 16, Sandy)
+# Keyed by box height: box_center.z = table top + known box height (box_center_from).
+SUCTION_Z_CORRECTION_BY_HEIGHT = {61.0: 12.0, 140.0: 22.0}
+
+
+def suction_correction(box_top_z: float) -> float:
+    """Correction for the box whose top is at box_top_z (matched by known height within 5 mm)."""
+    h = box_top_z - TABLE_TOP_Z
+    for height, corr in SUCTION_Z_CORRECTION_BY_HEIGHT.items():
+        if abs(h - height) <= 5:
+            return corr
+    return SUCTION_Z_CORRECTION_MM
 
 APPROACH_MM = 50.0  # hover height above the box top before descending
 PRESS_MM = 10.0     # press 10 mm past the top surface
@@ -65,7 +80,7 @@ def tip_target(box_center: Pose, height_above_top: float, tip_theta: float | Non
     return Pose(
         x=box_center.x,
         y=box_center.y,
-        z=box_center.z + height_above_top + SUCTION_Z_CORRECTION_MM,
+        z=box_center.z + height_above_top + suction_correction(box_center.z),
         o_x=0, o_y=0, o_z=-1,
         theta=overview_tip_theta() if tip_theta is None else tip_theta,
     )
@@ -126,8 +141,14 @@ async def hover_over_box(machine: RobotClient, box_center: Pose) -> None:
     await move_tip(machine, tip_target(box_center, APPROACH_MM), f"hover {APPROACH_MM:.0f} mm above the box")
 
 
+class PickFailedError(RuntimeError):
+    """The suction didn't hold the box. Suction is off and the tip has backed away."""
+
+
 async def pick_box(machine: RobotClient, box_center: Pose) -> None:
-    """Approach the box top, engage vacuum, report grip status, and lift it."""
+    """Approach the box top, engage vacuum, check the grip, and lift it.
+    Raises PickFailedError (suction off, tip backed up above the box) if the gripper isn't holding it,
+    instead of lifting nothing and carrying it to a zone."""
     gripper = Gripper.from_robot(machine, GRIPPER)
     confirm("open the vacuum gripper (turn suction OFF)")
     await gripper.open()
@@ -139,9 +160,16 @@ async def pick_box(machine: RobotClient, box_center: Pose) -> None:
     await asyncio.sleep(2)
     status = await gripper.is_holding_something()
     print("Holding an object:", status.is_holding_something)
+    if not status.is_holding_something:
+        await gripper.open()
+        await move_tip(machine, tip_target(box_center, APPROACH_MM), "back off (no grip)", straight_line=True)
+        raise PickFailedError("suction didn't hold the box (is the top flat and clean? is the tip on the box?)")
     await move_tip(machine, tip_target(box_center, LIFT_MM), "lift the box", straight_line=True)
     status = await gripper.is_holding_something()
     print("Holding something after lift:", status.is_holding_something)
+    if not status.is_holding_something:
+        await gripper.open()
+        raise PickFailedError("lost the box while lifting")
 
 
 async def release(machine: RobotClient) -> None:

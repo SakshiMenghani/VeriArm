@@ -69,6 +69,8 @@ Measured on Oct 16 with the real box: top and three sides are reachable at the f
 - **Test:** jog the arm, pick a box with a manual suction command, test both drops and the notification.
 
 ### main.py (Sakshi)
+- **Working end to end on the robot (Oct 16):** PKG-001 / Sakshi Menghani → ACCEPTED → picked, carried, placed in green (result #7); PKG-001 / Wrong Person (tall box) → REJECTED → placed in orange (result #8).
+- `place.py`: `place_box(machine, verified, drop_center)` carries the held box at 10 cm clearance, lowers it straight down to 1 cm above the zone, releases, backs off, returns to overview. `notify_done(result)` prints `result["say"]` (voice can go there). `python place.py --test-pick` / `--test-lift` are the grip checks used to debug the suction.
 - Connects once, then: `scan(machine)` → re-check the box position with `find_box(machine, move=False)` (the arm is back at overview after the scan) → `pick_box(machine, box_center)` → `place_box(machine, result["accepted"])` → `notify_done(result)`. `--loop` repeats until the blue zone is empty.
 - **Yixin: put `place_box(machine, verified)` and `notify_done(result)` in `place.py`.** `main.py` imports them from there automatically. Until `place.py` exists, `main.py` scans and stops **before** picking (the arm never holds a box with nowhere to put it); `notify_done` falls back to printing `result["say"]`.
 - If the gripper isn't holding the box after `pick_box`, it releases suction, goes back to overview and stops.
@@ -192,11 +194,12 @@ If a sheet is moved: `python zones.py --survey` then `python zones.py --check-dr
 
 - **Reachability:** can the arm reach the "back" inspection pose without hitting the box or table? Keep the blue zone well inside the arm's range.
 - **Calibration:** errors in the pixel-to-table conversion carry into every inspection pose. Test with the hover check above.
-- **Suction:** the cup may lose grip on a crinkly label or tape seam. Keep the top surface flat and clear.
+- **Suction (confirmed Oct 16):** the cup does NOT seal on bare corrugated cardboard or creased grey tape (box never lifted). It DOES seal on the printed label with smooth clear tape around it. **Put the label, or a smooth tape patch, in the middle of each box's top**: that's where the cup lands (and where the camera reads first). `pick_box` now refuses to lift if the holding sensor says no grip; the sensor was right every time.
 
 ## Calibration notes (measured Oct 16)
 
 - **Suction tip is 17 mm lower than the config thinks. Confirmed.** Measured with a ruler at two arm heights (config 158 → real 140 mm, config 167 → real 150 mm), then confirmed by the hover test: predicted 7.4 cm with the correction, measured 7.5 cm. Aim the tip **17 mm higher** in code whenever it approaches the box or table (`find_pick.SUCTION_Z_CORRECTION_MM`). The depth camera agrees with the configured table height within ~5 mm, so the cause is most likely the **gripper length** (config says 126 mm, real ≈ 143 mm). Fixing it in the gripper config would let us drop the correction; that's a team decision.
+- **Pick depth is per box size** (`find_pick.SUCTION_Z_CORRECTION_BY_HEIGHT`): hover test with a ruler gave large box (61 mm) → 12 mm, tall box (140 mm) → 22 mm, instead of one 17 mm for both. Other heights fall back to 17 mm. Re-check with a hover test when adding a box size.
 - **Move the suction tip, not the arm.** `arm.move_to_position()` positions the arm flange, which is 126 mm above the tip. To put the tip somewhere, use the motion service with the gripper (`robot.GRIPPER`) as the component to move. It also plans around the table and walls.
 - **Camera measures the blue zone surface at z ≈ −29 mm** (config table top: −23). If the table really is ~6 mm lower than configured, the 17 mm tip error is mostly the gripper length (~20 mm longer than the configured 126 mm). Camera offset could also be slightly off, so confirm with a ruler.
 - Arm base = world origin, so "arm base frame" and "world frame" are the same. The camera is attached to the arm with a calibrated offset. Run `python check_frames.py` to see where everything is (read-only).
