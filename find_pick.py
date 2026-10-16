@@ -57,13 +57,9 @@ def suction_correction(box_top_z: float) -> float:
     return SUCTION_Z_CORRECTION_MM
 
 APPROACH_MM = 50.0  # hover height above the box top before descending
-PRESS_MM = 15.0     # press 15 mm past the top surface
+PRESS_MM = 10.0     # press 10 mm past the top surface
 LIFT_MM = 80.0      # how far to lift after grabbing
 GRIP_SETTLE_S = 2.0 # wait after suction on before lifting
-GRIP_CHECK_BLOCKS = False  # camera grip check only warns for now: it misjudges plain cardboard
-GENTLE_LIFT_MM = 30.0   # lift the first part slowly, in small steps, so the seal holds as the weight comes on
-GENTLE_STEP_MM = 5.0
-GENTLE_PAUSE_S = 0.4
 
 ASK_BEFORE_MOVING = True
 
@@ -193,11 +189,10 @@ async def grip_point(machine: RobotClient, box_center: Pose) -> Pose:
 
 
 async def pick_box(machine: RobotClient, box_center: Pose) -> None:
-    """Approach the box top, engage vacuum, lift it, and confirm the grip with the wrist camera.
-    Raises PickFailedError (suction off, tip LIFT_MM above the box) if the box didn't come up,
-    instead of carrying nothing to a zone."""
+    """Approach the box top, suction on, lift straight up. This is the motion that picked and placed both
+    boxes on Oct 16 17:48/17:49: press PRESS_MM (10) into the top, wait 2 s, one straight lift.
+    The wrist-camera grip check (grip_check.py) is logged only; it never changes the motion."""
     gripper = Gripper.from_robot(machine, GRIPPER)
-    box_center = await grip_point(machine, box_center)  # on the label if there is one on the top
     confirm("open the vacuum gripper (turn suction OFF)")
     await gripper.open()
     await move_tip(machine, tip_target(box_center, APPROACH_MM), "approach above the box")
@@ -205,27 +200,13 @@ async def pick_box(machine: RobotClient, box_center: Pose) -> None:
     confirm("turn suction ON")
     grabbed = await gripper.grab()
     print("grab() returned:", grabbed)
-    await asyncio.sleep(GRIP_SETTLE_S)  # let the vacuum build
-    # Grip check with the wrist camera (is_holding_something is not reliable on this vacuum gripper):
-    # photo at the box top, lift straight up, photo again. Held -> the box rose with the camera.
+    await asyncio.sleep(GRIP_SETTLE_S)
     from grip_check import judge, wrist_photo
     before = await wrist_photo(machine)
-    h = -PRESS_MM
-    while h < GENTLE_LIFT_MM - PRESS_MM:  # slow start: small steps with pauses
-        h = min(h + GENTLE_STEP_MM, GENTLE_LIFT_MM - PRESS_MM)
-        await move_tip(machine, tip_target(box_center, h), f"lift slowly ({h + PRESS_MM:.0f} mm)", straight_line=True)
-        await asyncio.sleep(GENTLE_PAUSE_S)
     await move_tip(machine, tip_target(box_center, LIFT_MM), "lift the box", straight_line=True)
     held, score = judge(before, await wrist_photo(machine))
-    print(f"Grip check (camera): score {score:.2f} -> {'HELD' if held else 'NOT held'}  (captures/grip.jpg)")
-    if not held and not GRIP_CHECK_BLOCKS:
-        print("[pick] WARNING: camera check says not held; continuing anyway (GRIP_CHECK_BLOCKS = False)")
-    if not held and GRIP_CHECK_BLOCKS:
-        # put it back down first: if the check is wrong and the box IS held, it mustn't drop from a height
-        await move_tip(machine, tip_target(box_center, 10.0), "lower back before letting go", straight_line=True)
-        await gripper.open()
-        raise PickFailedError(f"the box didn't come up with the gripper (camera similarity {score:.2f}); "
-                              "is there a smooth patch in the middle of the box top?")
+    print(f"Grip check (camera, log only): score {score:.2f} -> {'held' if held else 'maybe not held'}  "
+          "(captures/grip.jpg)")
 
 
 async def release(machine: RobotClient) -> None:

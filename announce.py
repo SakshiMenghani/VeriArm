@@ -128,8 +128,17 @@ def _wait_until_spoken() -> None:
         _queue.join()
 
 
-def speak(text: str, wait: bool = False) -> None:
-    """Say `text` out loud (in the background, in order). Always printed too. wait=True blocks until said."""
+# Finish each sentence before the robot continues: speaking in the background while the robot code is
+# busy (point clouds, QR decoding, motion planning) made the audio stutter and sentences overlap the motion.
+# VERIARM_VOICE_WAIT=0 goes back to background speech.
+WAIT_FOR_SPEECH = os.environ.get("VERIARM_VOICE_WAIT", "1") != "0"
+
+
+def speak(text: str, wait: bool | None = None) -> None:
+    """Say `text` out loud, in order. Always printed too. Blocks until said when wait (default
+    WAIT_FOR_SPEECH)."""
+    if wait is None:
+        wait = WAIT_FOR_SPEECH
     global _worker
     print(f"[say] {text}")
     if os.environ.get("VERIARM_VOICE", "1") == "0":
