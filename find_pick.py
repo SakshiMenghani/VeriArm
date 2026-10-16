@@ -1,15 +1,16 @@
-"""Find the box in the blue zone (Sandy: find_box, locate) and pick it up (Yixin: pick_box).
+"""Find the box in the blue zone (Sandy: find_box) and pick it up (Yixin: pick_box).
 
 find_box() takes a live photo from overview-blue and finds the box anywhere in the blue zone.
 If the zone is blocked or there's no box, it raises an error instead of guessing.
 
 Every motion asks for confirmation unless --yes is passed. Keep someone at the e-stop.
+`find` also saves and opens captures/detection.jpg: pink = blue zone, yellow = box, red cross = center.
 
 Usage:
-    python find_pick.py plan      # print the targets, no connection to the robot
-    python find_pick.py locate    # no motion: arm must be at overview; print where the box is
-    python find_pick.py locate --image reference/box-center.jpg   # same, offline from a saved photo
-    python find_pick.py find      # move to overview, print box_center
+    python find_pick.py find                 # move to overview-blue, find the box, print box_center
+    python find_pick.py find --no-move       # find the box from where the arm is now (must be overview-blue)
+    python find_pick.py find --image reference/box-center.jpg   # offline, from a saved photo (no robot)
+    python find_pick.py plan      # print the pick targets, no connection to the robot
     python find_pick.py hover     # put the suction tip 50 mm above the box top (hover test)
     python find_pick.py pick      # pick the box (Yixin's, untested draft): approach, lower, suction on, lift
     python find_pick.py release   # turn suction off
@@ -25,7 +26,7 @@ from viam.proto.service.motion import Constraints, LinearConstraint
 from viam.robot.client import RobotClient
 from viam.services.motion import MotionClient
 
-from detect import KNOWN_BOXES, TABLE_TOP_Z, VIEW, BoxDetection, detect_box, find_box_in_photo
+from detect import KNOWN_BOXES, TABLE_TOP_Z, VIEW, BoxDetection, find_box_in_photo, live_images, save_debug_image
 from poses import get_pose
 from robot import ARM, GRIPPER, MOTION, connect
 
@@ -80,16 +81,36 @@ def box_center_from(box: BoxDetection) -> Pose:
     return Pose(x=box.x, y=box.y, z=top_z, o_x=0, o_y=0, o_z=1, theta=theta)
 
 
-async def find_box(machine: RobotClient) -> Pose:
-    """Move to overview and return box_center: x, y = center of the box, z = TOP of the box. mm, world frame."""
-    # Use the saved joint angles, not the tip pose: the planner can reach the same tip pose
-    # with a different arm posture (we saw it pick one at a joint limit), and detection
-    # needs the camera exactly where it was when the pose was recorded.
-    confirm(f"move to {OVERVIEW} (joint move)")
-    await Arm.from_robot(machine, ARM).move_to_joint_positions(JointPositions(values=get_pose(OVERVIEW)["joints"]))
-    box = await detect_box(machine)  # raises ZoneBlockedError / NoBoxError: don't guess, let the caller decide
-    print(f"Box found: x={box.x:.1f} y={box.y:.1f}, {box.length_mm:.0f} x {box.width_mm:.0f} mm, yaw {box.yaw_deg:.0f} deg")
-    return box_center_from(box)
+async def find_box(machine: RobotClient, move: bool = True) -> Pose:
+    """Return box_center: x, y = center of the box, z = TOP of the box. mm, world frame.
+
+    move=True: first move the arm to overview-blue. move=False: the arm must already be there.
+    Raises NoBoxError / ZoneBlockedError (and NotAtViewError if move=False and the arm is elsewhere)
+    instead of guessing. Saves captures/detection.jpg."""
+    if move:
+        # Use the saved joint angles, not the tip pose: the planner can reach the same tip pose
+        # with a different arm posture (we saw it pick one at a joint limit), and detection
+        # needs the camera exactly where it was when the pose was recorded.
+        confirm(f"move to {OVERVIEW} (joint move)")
+        await Arm.from_robot(machine, ARM).move_to_joint_positions(JointPositions(values=get_pose(OVERVIEW)["joints"]))
+    bgr, depth = await live_images(machine)
+    return _find_and_draw(bgr, depth)
+
+
+def _find_and_draw(bgr, depth) -> Pose:
+    """Detect the box in a photo from overview-blue, save the picture, return box_center."""
+    try:
+        box = find_box_in_photo(bgr, get_pose(VIEW), depth)
+    except LookupError as e:
+        save_debug_image(bgr, None, f"{type(e).__name__}: {e}"[:90], open_it=False)
+        raise
+    save_debug_image(bgr, box, open_it=False)
+    box_center = box_center_from(box)
+    print(f"Box '{box.name}': {box.length_mm:.0f} x {box.width_mm:.0f} x {box.height_mm:.0f} mm (measured), "
+          f"yaw {box.yaw_deg:.0f} deg")
+    print(f"  box_center (world mm):  x={box_center.x:.1f}  y={box_center.y:.1f}  z={box_center.z:.1f}  "
+          f"(z = top of the box: table {TABLE_TOP_Z:.0f} + {KNOWN_BOXES[box.name][2]:.0f} mm box height)")
+    return box_center
 
 
 async def hover_over_box(machine: RobotClient, box_center: Pose) -> None:
@@ -113,18 +134,16 @@ async def release(machine: RobotClient) -> None:
     await Gripper.from_robot(machine, GRIPPER).open()
 
 
-def print_locate(box: BoxDetection) -> None:
-    """Print where the box is (no grip decisions: that's pick_box's job)."""
-    print(f"Box '{box.name}': {box.length_mm:.0f} x {box.width_mm:.0f} x {box.height_mm:.0f} mm (measured), "
-          f"yaw {box.yaw_deg:.0f} deg")
-    c = box_center_from(box)
-    print(f"  box_center (world mm):  x={c.x:.1f}  y={c.y:.1f}  z={c.z:.1f}  "
-          f"(z = top of the box: table {TABLE_TOP_Z:.0f} + {KNOWN_BOXES[box.name][2]:.0f} mm box height)")
-
-
-async def locate(machine: RobotClient) -> None:
-    """No motion: photograph from overview and print where the box is."""
-    print_locate(await detect_box(machine))
+def _open_picture() -> None:
+    import subprocess
+    import sys
+    from detect import DEBUG_IMAGE
+    if not DEBUG_IMAGE.exists():
+        return  # no photo was taken (e.g. the arm wasn't at overview-blue)
+    opener = {"darwin": ["open"], "linux": ["xdg-open"]}.get(sys.platform)
+    if opener:
+        subprocess.run(opener + [str(DEBUG_IMAGE)], check=False)
+    print(f"Picture: {DEBUG_IMAGE}  (pink = blue zone, yellow = box, red = center)")
 
 
 def print_plan() -> None:
@@ -142,42 +161,43 @@ def print_plan() -> None:
 async def main():
     global ASK_BEFORE_MOVING
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("action", choices=["plan", "locate", "find", "hover", "pick", "release"])
+    parser.add_argument("action", choices=["find", "plan", "hover", "pick", "release"])
     parser.add_argument("--yes", action="store_true", help="don't ask before each motion")
-    parser.add_argument("--image", help="locate only: use a saved photo from overview-blue (+ its .npy depth)")
+    parser.add_argument("--no-move", action="store_true", help="find: don't move to overview-blue first")
+    parser.add_argument("--image", help="find: use a saved photo from overview-blue (+ its .npy depth), no robot")
     args = parser.parse_args()
     ASK_BEFORE_MOVING = not args.yes
 
     if args.action == "plan":
         print_plan()
         return
-    if args.action == "locate" and args.image:
+    from detect import DEBUG_IMAGE
+    DEBUG_IMAGE.unlink(missing_ok=True)  # only ever show a picture from this run
+    if args.action == "find" and args.image:
         import cv2
         import numpy as np
         from pathlib import Path
         depth_file = Path(args.image).with_suffix(".npy")
         depth = np.load(depth_file) if depth_file.exists() else None
         try:
-            print_locate(find_box_in_photo(cv2.imread(args.image), get_pose(VIEW), depth))
+            _find_and_draw(cv2.imread(args.image), depth)
         except LookupError as e:
             raise SystemExit(f"{type(e).__name__}: {e}")
+        finally:
+            _open_picture()
         return
 
     async with await connect() as machine:
         if args.action == "release":
             await release(machine)
             return
-        if args.action == "locate":
-            try:
-                await locate(machine)
-            except (LookupError, RuntimeError) as e:  # NoBoxError, ZoneBlockedError, NotAtViewError
-                raise SystemExit(f"{type(e).__name__}: {e}")
-            return
         try:
-            box_center = await find_box(machine)
-        except LookupError as e:  # ZoneBlockedError or NoBoxError
-            raise SystemExit(f"Not moving: {e}")
-        print(f"box_center: x={box_center.x:.1f} y={box_center.y:.1f} z={box_center.z:.1f}")
+            box_center = await find_box(machine, move=not args.no_move)
+        except (LookupError, RuntimeError) as e:  # NoBoxError, ZoneBlockedError, NotAtViewError
+            raise SystemExit(f"Not moving: {type(e).__name__}: {e}")
+        finally:
+            if args.action == "find":
+                _open_picture()
         if args.action == "hover":
             await hover_over_box(machine, box_center)
         elif args.action == "pick":

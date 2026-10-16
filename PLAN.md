@@ -50,7 +50,7 @@ Measured on Oct 16 with the real box: top and three sides are reachable at the f
 
 ### Sandy — find the box
 - `find_box(machine) -> box_center`: move to `overview-blue`, detect the box in the blue zone (by depth + size, `detect.KNOWN_BOXES`), return its position. Raises `NoBoxError` / `ZoneBlockedError` instead of guessing. **Done; live detection works.**
-- `python find_pick.py locate`: print where the box is without moving (arm at `overview-blue`, or `--image` on a saved photo).
+- `python find_pick.py find`: find the box from the terminal (`--no-move` to stay put, `--image` for a saved photo). Opens a picture of the detection.
 - Shared setup: frame system check, 17 mm tip offset, saved poses, `blue_zone`. **Done.**
 - **Test:** hover the gripper over the point `find_box` returns and check it's within a couple of cm of the real center. **Passed** (blue zone center).
 - Todo: test detection with the box off-center and rotated.

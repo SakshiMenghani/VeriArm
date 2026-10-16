@@ -7,11 +7,10 @@ The blue zone's position is saved once (as "blue_zone" in poses.json) from a pho
 empty zone. The box is then found by height (depth camera) inside that area, and matched
 against the known box sizes, so any color of box works and hands or flat paper are ignored.
 
-Usage:
-    python detect.py                     # live photo (arm at overview-blue): find the box
-    python detect.py --save-zone         # live photo of the EMPTY zone: save its position as "blue_zone"
-    python detect.py --save-photo NAME   # also keep the photo (+ depth) in reference/ for offline tests
-    python detect.py --image PATH        # offline, on a saved photo (uses PATH's .npy depth if present)
+Setup commands (to find the box, use `python find_pick.py find`):
+    python detect.py --save-zone           # arm at overview-blue, zone EMPTY: save its position as "blue_zone"
+    python detect.py --save-photo NAME     # arm at overview-blue: keep the photo (+ depth) in reference/ for tests
+    python detect.py --save-zone --image PATH   # save the zone from a saved photo of the empty zone
 """
 import argparse
 import asyncio
@@ -67,6 +66,7 @@ class BoxDetection:
     height_mm: float         # measured from depth (or the known height if no depth)
     yaw_deg: float           # direction of the long side in the world x-y plane, 0-180
     pixel: tuple             # center in the photo
+    corners_px: list         # outline in the photo (4 corners), for drawing
 
 
 # ---------- geometry ----------
@@ -223,11 +223,38 @@ def find_box_in_photo(bgr: np.ndarray, view: dict, depth: np.ndarray | None = No
         dx, dy = np.subtract(corners[(i + 1) % 4], corners[i])
         yaw = float(np.degrees(np.arctan2(dy, dx))) % 180.0
         return BoxDetection(name, x, y, length, width, height if height is not None else KNOWN_BOXES[name][2],
-                            yaw, tuple(round(c) for c in rect[0]))
+                            yaw, tuple(round(c) for c in rect[0]), cv2.boxPoints(rect).round().astype(int).tolist())
 
     detail = f" (saw objects: {'; '.join(seen)}; known boxes: " + ", ".join(
         f"{n} {l:.0f} x {w:.0f} x {h:.0f}" for n, (l, w, h) in KNOWN_BOXES.items()) + ")" if seen else ""
     raise NoBoxError(f"no known box in the blue zone{detail}")
+
+
+# ---------- picture for humans ----------
+
+DEBUG_IMAGE = Path(__file__).parent / "captures" / "detection.jpg"
+
+
+def save_debug_image(bgr: np.ndarray, box: BoxDetection | None, message: str = "", open_it: bool = True) -> Path:
+    """Draw the saved zone (pink), the detected box (yellow) and its center (red cross); save and open it."""
+    img = bgr.copy()
+    if "blue_zone" in load_poses():
+        cv2.drawContours(img, [cv2.boxPoints(saved_zone_rect()).astype(np.int32)], -1, (255, 0, 255), 2)
+    if box is not None:
+        cv2.drawContours(img, [np.array(box.corners_px, np.int32)], -1, (0, 255, 255), 3)
+        cv2.drawMarker(img, box.pixel, (0, 0, 255), cv2.MARKER_CROSS, 40, 3)
+        message = message or f"{box.name}: x={box.x:.0f} y={box.y:.0f} mm, yaw {box.yaw_deg:.0f} deg"
+    cv2.rectangle(img, (0, 0), (img.shape[1], 40), (0, 0, 0), -1)
+    cv2.putText(img, message or "no box", (10, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
+    DEBUG_IMAGE.parent.mkdir(exist_ok=True)
+    cv2.imwrite(str(DEBUG_IMAGE), img)
+    if open_it:
+        import subprocess
+        import sys
+        opener = {"darwin": ["open"], "linux": ["xdg-open"]}.get(sys.platform)
+        if opener:
+            subprocess.run(opener + [str(DEBUG_IMAGE)], check=False)
+    return DEBUG_IMAGE
 
 
 # ---------- live camera ----------
@@ -282,16 +309,16 @@ async def _live_main() -> tuple:
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--image", help="use this photo (taken from overview-blue), no robot")
     parser.add_argument("--save-zone", action="store_true", help="save the (empty) zone's position as blue_zone")
     parser.add_argument("--save-photo", metavar="NAME", help="keep the live photo as reference/NAME.jpg (+ .npy depth)")
+    parser.add_argument("--image", help="--save-zone only: use this saved photo instead of a live one")
     args = parser.parse_args()
+    if not (args.save_zone or args.save_photo):
+        parser.error("nothing to do: use --save-zone and/or --save-photo NAME (to find the box: python find_pick.py find)")
 
     view = get_pose(VIEW)
     if args.image:
         bgr = cv2.imread(args.image)
-        depth_file = Path(args.image).with_suffix(".npy")
-        depth = np.load(depth_file) if depth_file.exists() else None
     else:
         bgr, depth = asyncio.run(_live_main())
         if args.save_photo:
@@ -309,15 +336,6 @@ def main():
         save_zone(rect, view)
         z = load_poses()["blue_zone"]["center_world"]
         print(f"Saved blue_zone: center x={z['x']:.1f} y={z['y']:.1f}. Commit poses.json so the team gets it.")
-        return
-
-    print(f"Depth: {'yes' if depth is not None else 'no (color fallback)'}")
-    try:
-        box = find_box_in_photo(bgr, view, depth)
-        print(f"Box '{box.name}': center x={box.x:.1f}  y={box.y:.1f}, top {box.length_mm:.0f} x {box.width_mm:.0f} mm, "
-              f"{box.height_mm:.0f} mm tall, yaw {box.yaw_deg:.0f} deg")
-    except LookupError as e:
-        print(f"{type(e).__name__}: {e}")
 
 
 if __name__ == "__main__":
