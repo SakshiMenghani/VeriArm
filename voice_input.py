@@ -30,6 +30,8 @@ END_SILENCE_S = 1.0          # stop after this much quiet once someone has spoke
 MAX_RECORD_S = 10.0
 SPEECH_FACTOR = 3.0          # speech = louder than room noise x this
 MIN_SPEECH_RMS = 0.01
+MIN_SPEECH_S = 0.15          # this much continuous sound before it counts as speech (ignores clicks/bumps)
+LAST_ANSWER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "captures", "last_answer.wav")
 BEEP = "/System/Library/Sounds/Tink.aiff"
 
 STT_URL = "https://api.elevenlabs.io/v1/speech-to-text"
@@ -41,36 +43,65 @@ class ListenError(RuntimeError):
     """Nothing usable was heard (silence, no key, API trouble)."""
 
 
-def _beep() -> None:
-    if os.path.exists(BEEP):
-        subprocess.run(["afplay", BEEP], check=False)
+_noise_rms: float | None = None  # room noise, measured once (calibrate) and reused for every question
 
 
-def record_until_silence() -> bytes | None:
-    """Record the default mic until the speaker goes quiet. Returns WAV bytes, or None if nobody spoke."""
+def _rms(data) -> float:
+    return float(np.sqrt(np.mean(data ** 2)))
+
+
+def calibrate() -> float:
+    """Measure the room noise now (call while nobody is talking, e.g. before the first question)."""
+    import sounddevice as sd
+    global _noise_rms
+    block = int(SAMPLE_RATE * BLOCK_S)
+    with sd.InputStream(samplerate=SAMPLE_RATE, channels=1, dtype="float32", blocksize=block) as stream:
+        _noise_rms = float(np.median([_rms(stream.read(block)[0]) for _ in range(int(CALIBRATE_S / BLOCK_S))]))
+    print(f"  [listen] room noise {_noise_rms:.4f}, speech threshold {_threshold():.4f}")
+    return _noise_rms
+
+
+def _threshold() -> float:
+    return max(MIN_SPEECH_RMS, (_noise_rms or 0.0) * SPEECH_FACTOR)
+
+
+def record_until_silence(beep: bool = True) -> bytes | None:
+    """Beep, then record the default mic until the speaker goes quiet. Returns WAV bytes, or None if
+    nobody spoke. The mic is already open during the beep (the beep itself is skipped), so a fast answer
+    right after it isn't cut off."""
     import sounddevice as sd  # here, not at the top: only needed when actually listening
 
+    if _noise_rms is None:
+        calibrate()
+    threshold = _threshold()
     block = int(SAMPLE_RATE * BLOCK_S)
-    chunks, started, quiet_s, waited_s = [], False, 0.0, 0.0
+    need_loud = max(1, round(MIN_SPEECH_S / BLOCK_S))
+    chunks, started, loud_run, quiet_s, waited_s, peak = [], False, 0, 0.0, 0.0, 0.0
     with sd.InputStream(samplerate=SAMPLE_RATE, channels=1, dtype="float32", blocksize=block) as stream:
-        noise = [float(np.sqrt(np.mean(stream.read(block)[0] ** 2))) for _ in range(int(CALIBRATE_S / BLOCK_S))]
-        threshold = max(MIN_SPEECH_RMS, float(np.median(noise)) * SPEECH_FACTOR)
+        beeper = subprocess.Popen(["afplay", BEEP]) if beep and os.path.exists(BEEP) else None
+        while beeper is not None and beeper.poll() is None:
+            stream.read(block)  # don't listen to our own beep
         t0 = time.monotonic()
         while time.monotonic() - t0 < START_TIMEOUT_S + MAX_RECORD_S:
             data, _ = stream.read(block)
-            loud = float(np.sqrt(np.mean(data ** 2))) > threshold
+            level = _rms(data)
+            peak = max(peak, level)
+            loud = level > threshold
             if not started:
                 waited_s += BLOCK_S
-                chunks = (chunks + [data])[-6:]  # keep ~0.3 s before speech starts, so the first word isn't cut
-                if loud:
+                chunks = (chunks + [data])[-8:]  # keep ~0.4 s before speech starts, so the first word isn't cut
+                loud_run = loud_run + 1 if loud else 0
+                if loud_run >= need_loud:
                     started = True
                 elif waited_s > START_TIMEOUT_S:
+                    print(f"  [listen] nobody spoke (loudest {peak:.4f} vs threshold {threshold:.4f})")
                     return None
                 continue
             chunks.append(data)
             quiet_s = 0.0 if loud else quiet_s + BLOCK_S
             if quiet_s >= END_SILENCE_S or len(chunks) * BLOCK_S >= MAX_RECORD_S:
                 break
+    print(f"  [listen] recorded {len(chunks) * BLOCK_S:.1f} s (loudest {peak:.4f}, threshold {threshold:.4f})")
     pcm = (np.clip(np.concatenate(chunks)[:, 0], -1, 1) * 32767).astype("<i2")
     buf = io.BytesIO()
     with wave.open(buf, "wb") as w:
@@ -78,6 +109,9 @@ def record_until_silence() -> bytes | None:
         w.setsampwidth(2)
         w.setframerate(SAMPLE_RATE)
         w.writeframes(pcm.tobytes())
+    os.makedirs(os.path.dirname(LAST_ANSWER), exist_ok=True)
+    with open(LAST_ANSWER, "wb") as f:  # to hear exactly what it heard: afplay captures/last_answer.wav
+        f.write(buf.getvalue())
     return buf.getvalue()
 
 
@@ -111,7 +145,6 @@ def ask(question: str, typed: bool = False, save: str | None = None) -> str:
     announce.speak(question, wait=True)
     if typed:
         return input("  (type your answer) > ").strip()
-    _beep()
     print("  [listening...]")
     audio = record_until_silence()
     if audio is None:
@@ -124,7 +157,7 @@ def ask(question: str, typed: bool = False, save: str | None = None) -> str:
     except ListenError as e:
         print(f"  [listen] {e}")
         return ""
-    print(f"  [heard] {text!r}")
+    print(f"  [heard] {text!r}" + ("  (no words found: listen to captures/last_answer.wav)" if not text else ""))
     return text
 
 

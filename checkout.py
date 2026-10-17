@@ -150,6 +150,9 @@ FIXED_LINES = [  # generated in the background at start, so they play without de
 
 async def conversation(machine, args) -> None:
     announce.prepare(FIXED_LINES)
+    if not args.type:
+        import voice_input
+        voice_input.calibrate()  # measure the room while it's quiet, before VeriArm starts talking
     announce.intro()
     while True:
         if not await handle_package(machine, args):
