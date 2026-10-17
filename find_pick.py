@@ -105,10 +105,11 @@ def box_center_from(box: BoxDetection) -> Pose:
     return Pose(x=box.x, y=box.y, z=top_z, o_x=0, o_y=0, o_z=1, theta=box.yaw_deg)
 
 
-async def find_box(machine: RobotClient, move: bool = True) -> Pose:
+async def find_box(machine: RobotClient, move: bool = True, speak: bool = True) -> Pose:
     """Return box_center: x, y = center of the box, z = TOP of the box, theta = box yaw (deg). mm, world frame.
 
     move=True: first move the arm to overview-blue. move=False: the arm must already be there.
+    speak=False: no announcement either way (used while quietly watching the zone for a package).
     Raises NoBoxError / ZoneBlockedError (and NotAtViewError if move=False and the arm is elsewhere)
     instead of guessing. Saves captures/detection.jpg."""
     if move:
@@ -120,9 +121,11 @@ async def find_box(machine: RobotClient, move: bool = True) -> Pose:
     try:
         box_center, box_name = _find_and_draw(bgr, depth)
     except LookupError as e:  # NoBoxError / ZoneBlockedError
-        announce.no_package(e)  # announcement 2 (see announce.py)
+        if speak:
+            announce.no_package(e)  # announcement 2 (see announce.py)
         raise
-    announce.package_detected(box_name, recheck=not move)  # announcement 2 (see announce.py)
+    if speak:
+        announce.package_detected(box_name, recheck=not move)  # announcement 2 (see announce.py)
     return box_center
 
 

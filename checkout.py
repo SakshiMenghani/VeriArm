@@ -2,24 +2,24 @@
 
 Per package, at the blue zone:
   scan (find -> read label -> check inventory)
-  UNIDENTIFIED (no / unreadable / non-VeriArm label, not in the inventory, recalled):
+  UNIDENTIFIED (no / unreadable / non-VeriArm label, not in the inventory, wrong recipient name):
            "I can't identify this package. Please generate a shipping label first, ..." -> stays, no move
-  PAID     (ORDERS says so, with its shipping):  "This package is paid, with Standard shipping."
+  PAID     (inventory says so, with its shipping):  "This package is paid, with Standard shipping."
   UNPAID   "Standard for 5 dollars, or Express for 12?" -> "tap your card on the purple area, then say done"
            -> "Payment accepted."   (cancelled -> "This package stays here until it's paid." -> no move)
   "Would you like the notification sent to your email?" -> "Sending it to <email>."
 then:   pick -> Standard -> green zone, Express -> orange zone
         "Would you like to place another package?" -> next package, or "Thanks, goodbye!"
 
-Paid status and shipping are hardcoded in ORDERS for the demo (to move into the inventory database).
-Stage 1: the email is only announced (sending: stage 2); the card tap is confirmed by saying "done"
+Paid status, shipping and the email come from the inventory database (inventory_seed.csv); paying at
+checkout marks the package PAID there. The email is sent by notify.py (SMTP settings in .env); the card tap is confirmed by saying "done"
 (camera check: stage 3).
 
   python checkout.py                       full conversation with the robot (no motion prompts)
   python checkout.py --confirm             ... asking before each robot motion
   python checkout.py --no-pick             talk + scan, but never pick up the box
   python checkout.py --simulate PKG-003    no robot: test the conversation for this package
-                                           (PKG-001 paid, PKG-003 unpaid, PKG-006 recalled, NONE no label)
+                                           (PKG-001 paid, PKG-003 unpaid, PKG-099 unknown, NONE no label)
   python checkout.py --type ...            type your answers instead of speaking them
   python checkout.py --once                one package, then goodbye (--max N: stop after N packages)
 
@@ -35,20 +35,13 @@ import announce
 from understand import understand
 from voice_input import ask
 
-# Hardcoded for the demo, until the inventory database has paid / shipping columns.
-# Known packages that aren't listed here pay at checkout.
-ORDERS = {
-    "PKG-001": {"paid": True, "shipping": "standard"},
-    "PKG-003": {"paid": False},
-}
+# Paid status, shipping and the notification email come from the inventory database (inventory_seed.csv).
 SHIPPING = {  # key -> (name, delivery time, price in dollars, zone)
     "standard": ("Standard", "3 to 5 days", 5, "green"),
     "express": ("Express", "1 to 2 days", 12, "orange"),
 }
 YES_NO = {"yes": "yes / agree / please do", "no": "no / decline / not now / no thanks"}
-READY = {"ready": "the package is placed / ready / go", "stop": "they want to stop / finish"}
 MAX_TRIES = 2
-SIMULATED_INVENTORY = {"PKG-001", "PKG-002", "PKG-003", "PKG-004", "PKG-005"}  # --simulate only (PKG-006 recalled)
 
 
 def choose(question: str, choices: dict[str, str], typed: bool, retry: str | None = None) -> str | None:
@@ -96,14 +89,27 @@ def take_payment(typed: bool) -> str | None:
     return ship
 
 
-def offer_notification(typed: bool) -> None:
+def offer_notification(typed: bool, result: dict, shipping: str, paid_now: bool = False,
+                       simulate: bool = False) -> None:
+    """Email the package's sender_email (inventory; falls back to VERIARM_NOTIFY_EMAIL in .env) via notify.py.
+    simulate: say it, but don't send."""
     if choose("Would you like the notification sent to your email?", YES_NO, typed) != "yes":
         return
-    email = notify_email()
-    if email:
-        announce.speak(f"Sending it to {spoken_email(email)}.")  # stage 2: actually send it
-    else:
+    email = result.get("sender_email") or notify_email()
+    if not email:
         announce.speak("I don't have an email address set up yet.")
+        return
+    announce.speak(f"Sending it to {spoken_email(email)}.")
+    if simulate:
+        print(f"[notify] (simulate) not sending to {email}")
+        return
+    import notify
+    try:
+        notify.send_package_email(email, result.get("package_id"), result.get("recipient"), shipping, paid_now)
+        print(f"[notify] email sent to {email}")
+    except notify.NotifyError as e:
+        print(f"[notify] email to {email} failed: {e}")
+        announce.speak("Sorry, I couldn't send the email.")
 
 
 async def move_to_shipping_area(machine, result: dict, shipping: str) -> bool:
@@ -133,13 +139,48 @@ async def move_to_shipping_area(machine, result: dict, shipping: str) -> bool:
 
 
 def simulated_result(package: str) -> dict:
-    """A scan result without the robot, for --simulate."""
+    """A scan result without the robot, for --simulate: the package as the inventory database has it."""
+    from inventory import PAID, connect_db, get_item
     pid = None if package.upper() == "NONE" else package.upper()
+    db = connect_db()
+    try:
+        item = get_item(db, pid) if pid else None
+    finally:
+        db.close()
     announce.package_detected("large")
     announce.checking_label()
-    announce.label_read(f"VA1|{pid}|Test Person" if pid else None)
-    return {"accepted": pid in SIMULATED_INVENTORY, "package_id": pid,
-            "reason": "Matches inventory" if pid in SIMULATED_INVENTORY else "Not expected"}
+    announce.label_read(f"VA1|{pid}|{item['recipient'] if item else 'Test Person'}" if pid else None)
+    if item is None:
+        return {"accepted": False, "package_id": pid, "reason": "Not in inventory" if pid else "No label found"}
+    paid = item["payment"] == PAID
+    return {"accepted": paid, "package_id": pid, "recipient": item["recipient"],
+            "reason": "Paid" if paid else "Not paid", "payment": item["payment"],
+            "shipping": item["shipping"], "sender_email": item["sender_email"]}
+
+
+WATCH_INTERVAL_S = 1.5  # how often to look at the blue zone while waiting
+CONFIRM_LOOKS = 2       # a box must be seen this many looks in a row (one bad frame is not a package)
+
+
+async def wait_for_package(machine) -> None:
+    """Watch the blue zone quietly until a box is really there. Says nothing per look; scan() then
+    announces "Package detected" once."""
+    import find_pick
+    from detect import NoBoxError, ZoneBlockedError
+    seen, first, waiting_said = 0, True, False
+    while seen < CONFIRM_LOOKS:
+        try:
+            await find_pick.find_box(machine, move=first, speak=False)  # move to overview-blue once
+            seen += 1
+        except (NoBoxError, ZoneBlockedError) as e:  # empty, or a hand is in the zone placing the box
+            seen = 0
+            if not waiting_said:
+                print(f"[checkout] waiting for a package in the blue zone ({type(e).__name__})")
+                announce.speak("Waiting for a package in the blue zone.")
+                waiting_said = True
+        first = False
+        if seen < CONFIRM_LOOKS:
+            await asyncio.sleep(WATCH_INTERVAL_S)
 
 
 async def handle_package(machine, args) -> bool:
@@ -149,6 +190,7 @@ async def handle_package(machine, args) -> bool:
     else:
         from detect import NotAtViewError, ZoneBlockedError
         from scan import scan
+        await wait_for_package(machine)
         try:
             result = await scan(machine)  # announces: detected, label read
         except (ZoneBlockedError, NotAtViewError) as e:  # find_box already said "I can't see the blue zone"
@@ -157,22 +199,29 @@ async def handle_package(machine, args) -> bool:
         if result is None:
             return False
 
-    if not result["accepted"]:  # no / unreadable / non-VeriArm label, not in inventory, recalled
+    unpaid = result.get("reason") == "Not paid"  # our label, known package, recipient matches: pays at checkout
+    if not result["accepted"] and not unpaid:  # no / unreadable / non-VeriArm label, not in inventory, wrong name
         print(f"[checkout] unidentified: {result.get('reason')}")
         announce.speak("I can't identify this package. Please generate a shipping label first, "
                        "then place it in the checkout area.")
         return True
 
-    order = ORDERS.get(result["package_id"], {"paid": False})
-    if order["paid"]:
-        shipping = order["shipping"]
+    if not unpaid:
+        shipping = (result.get("shipping") or "standard").lower()
         announce.speak(f"This package is paid, with {SHIPPING[shipping][0]} shipping.")
     else:
         shipping = take_payment(args.type)
         if shipping is None:
             return True  # not paid: the box stays at the counter
+        if not args.simulate:  # record the payment, so the next scan sees it as paid
+            from inventory import connect_db, set_payment
+            db = connect_db()
+            try:
+                set_payment(db, result["package_id"], True, shipping)
+            finally:
+                db.close()
 
-    offer_notification(args.type)  # at the counter, before the box moves
+    offer_notification(args.type, result, shipping, paid_now=unpaid, simulate=bool(args.simulate))  # before the move
 
     if args.simulate:
         announce.moving_to(SHIPPING[shipping][3])
@@ -192,8 +241,9 @@ FIXED_LINES = [  # generated in the background at start, so they play without de
     "Payment accepted.", "This package stays here until it's paid.",
     "I can't identify this package. Please generate a shipping label first, then place it in the checkout area.",
     "Would you like the notification sent to your email?", "Would you like to place another package?",
-    "Great. Place it in the blue zone, then say ready.", "Thanks, goodbye!",
+    "Great. Place it in the blue zone.", "Waiting for a package in the blue zone.", "Thanks, goodbye!",
     "Moving the package to the Standard shipping area.", "Moving the package to the Express shipping area.",
+    "Sorry, I couldn't send the email.",
 ]
 
 
@@ -206,17 +256,13 @@ async def conversation(machine, args) -> None:
     handled = 0
     while True:
         if not await handle_package(machine, args):
-            if choose("I don't see a package in the blue zone. Please place one, then say ready.",
-                      READY, args.type) != "ready":
-                break
-            continue
+            continue  # the box was gone by the time we scanned: wait for one again
         handled += 1
         if args.simulate or args.once or (args.max and handled >= args.max):
             break
         if choose("Would you like to place another package?", YES_NO, args.type) != "yes":
             break
-        if choose("Great. Place it in the blue zone, then say ready.", READY, args.type) != "ready":
-            break
+        announce.speak("Great. Place it in the blue zone.")  # wait_for_package() notices it
     announce.speak("Thanks, goodbye!", wait=True)
 
 
@@ -224,7 +270,7 @@ async def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--confirm", action="store_true", help="ask before each robot motion")
     p.add_argument("--no-pick", action="store_true", help="scan and talk, but never pick the box up")
-    p.add_argument("--simulate", metavar="PACKAGE", help="no robot: PKG-001, PKG-003, PKG-006, NONE ...")
+    p.add_argument("--simulate", metavar="PACKAGE", help="no robot: PKG-001, PKG-003, PKG-099, NONE ...")
     p.add_argument("--type", action="store_true", help="type answers instead of speaking them")
     p.add_argument("--once", action="store_true", help="one package, then goodbye")
     p.add_argument("--max", type=int, help="stop after this many packages")
