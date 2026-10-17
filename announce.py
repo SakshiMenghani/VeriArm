@@ -2,6 +2,7 @@
 
 Speech runs in the background, one sentence after another, so the arm never waits for it.
 Mute with the environment variable VERIARM_VOICE=0 (sentences are still printed).
+Voice: ElevenLabs when ELEVENLABS_API_KEY is in .env (cached per sentence), else the Mac's `say`.
 
 THE SCRIPT: every announcement VeriArm makes, and exactly where in the code it's triggered.
 To change wording, edit the functions below; to move or remove an announcement, edit the call site.
@@ -125,11 +126,87 @@ def _speech_command(text: str) -> list[str] | None:
     return None
 
 
+# ---------- ElevenLabs voice (same approach as art_curator/narrate.py) ----------
+# Used when ELEVENLABS_API_KEY is in .env; any sentence it can't deliver goes to the Mac voice instead.
+# Clips are cached by text, so repeated sentences (intro, questions) play instantly. VERIARM_TTS=say
+# forces the Mac voice. Optional .env: ELEVENLABS_VOICE_ID, ELEVENLABS_MODEL.
+VOICE_CACHE = Path(__file__).parent / "captures" / "voice_cache"
+DEFAULT_VOICE_ID = "JBFqnCBsd6RMkjVDRZzb"  # "George": warm (ElevenLabs default library)
+DEFAULT_TTS_MODEL = "eleven_multilingual_v2"
+TTS_TIMEOUT_S = 20.0
+
+_eleven: dict | None = None   # {"key", "voice", "model"} once configured; {} = not available
+_pool = None                  # background generation of clips
+
+
+def _elevenlabs() -> dict:
+    global _eleven
+    if _eleven is None:
+        _eleven = {}
+        if os.environ.get("VERIARM_TTS", "").lower() != "say" and shutil.which("afplay"):
+            from robot import _load_env
+            _load_env()
+            key = os.environ.get("ELEVENLABS_API_KEY", "").strip()
+            if key:
+                _eleven = {"key": key,
+                           "voice": os.environ.get("ELEVENLABS_VOICE_ID", "").strip() or DEFAULT_VOICE_ID,
+                           "model": os.environ.get("ELEVENLABS_MODEL", "").strip() or DEFAULT_TTS_MODEL}
+    return _eleven
+
+
+def _clip(text: str) -> Path:
+    """mp3 of `text` in the ElevenLabs voice, from the cache or freshly generated. Raises on failure."""
+    import hashlib
+    import urllib.request
+    cfg = _elevenlabs()
+    path = VOICE_CACHE / (hashlib.sha1(f"{cfg['voice']}|{cfg['model']}|{text}".encode()).hexdigest() + ".mp3")
+    if path.exists():
+        return path
+    req = urllib.request.Request(
+        f"https://api.elevenlabs.io/v1/text-to-speech/{cfg['voice']}?output_format=mp3_44100_128",
+        data=json.dumps({"text": text, "model_id": cfg["model"]}).encode(),
+        headers={"xi-api-key": cfg["key"], "Content-Type": "application/json"}, method="POST")
+    with urllib.request.urlopen(req, timeout=TTS_TIMEOUT_S) as resp:
+        audio = resp.read()
+    VOICE_CACHE.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".part")
+    tmp.write_bytes(audio)
+    tmp.replace(path)
+    return path
+
+
+def prepare(texts: list[str]) -> None:
+    """Generate these sentences in the background now, so they play without delay later."""
+    global _pool
+    if os.environ.get("VERIARM_VOICE", "1") == "0" or not _elevenlabs():
+        return
+    if _pool is None:
+        from concurrent.futures import ThreadPoolExecutor
+        _pool = ThreadPoolExecutor(max_workers=4)
+    for text in texts:
+        _pool.submit(_clip, text)
+
+
+def _say_one(text: str) -> None:
+    global _eleven
+    if _elevenlabs():
+        try:
+            subprocess.run(["afplay", str(_clip(text))], check=False)
+            return
+        except Exception as e:  # network, quota, timeout: this sentence gets the Mac voice
+            if getattr(e, "code", None) in (401, 402, 403):  # bad key / out of credits: stop trying
+                _eleven = {}
+                print(f"[voice] ElevenLabs refused ({e}); Mac voice from now on")
+            else:
+                print(f"[voice] ElevenLabs failed ({type(e).__name__}: {e}); Mac voice for this sentence")
+    cmd = _speech_command(text)
+    if cmd:
+        subprocess.run(cmd, check=False)
+
+
 def _run_worker() -> None:
     while (text := _queue.get()) is not None:
-        cmd = _speech_command(text)
-        if cmd:
-            subprocess.run(cmd, check=False)
+        _say_one(text)
         _queue.task_done()
     _queue.task_done()
 

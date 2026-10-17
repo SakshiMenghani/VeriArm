@@ -138,7 +138,18 @@ async def handle_package(machine, args) -> bool:
     return True
 
 
+FIXED_LINES = [  # generated in the background at start, so they play without delay (ElevenLabs voice)
+    "Hello, this is VeriArm. I'll be here to help you sort packages whenever you are ready.",
+    "This package is paid.", "This package hasn't been paid yet.", "Payment accepted.",
+    "Would you like the notification sent to your email?", "Would you like to place another package?",
+    "Great. Place it in the blue zone, then say ready.", "Thanks, goodbye!",
+    "Package detected: the large box.", "Moving the package to the green area.",
+    "Moving the package to the orange area.",
+]
+
+
 async def conversation(machine, args) -> None:
+    announce.prepare(FIXED_LINES)
     announce.intro()
     while True:
         if not await handle_package(machine, args):
