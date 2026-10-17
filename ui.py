@@ -25,7 +25,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 import label_api
-from inventory import connect_db
+from inventory import connect_db, reset_to_seed
 
 ROOT = Path(__file__).parent
 RUNS = ROOT / "runs"
@@ -174,6 +174,15 @@ class Handler(label_api.Handler):
             return self._json({"ok": ok, "message": msg}, 200 if ok else 409)
         if path == "/run/stop":
             return self._json({"message": RUNNER.stop()})
+        if path == "/reset":  # demo reset: payment / shipping / status back to the seed, emails kept
+            if RUNNER.status(0)["state"] == "running":
+                return self._json({"ok": False, "message": "Stop the run before resetting."}, 409)
+            db = connect_db()
+            try:
+                n = reset_to_seed(db)
+            finally:
+                db.close()
+            return self._json({"ok": True, "message": f"Reset {n} packages to the seed data (emails kept)."})
         return super().do_POST()
 
 

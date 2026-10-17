@@ -14,6 +14,8 @@ Each package also has a sender_email (notified when the label's name matches) an
 
   python inventory.py init              reload inventory.db from inventory_seed.csv (also happens
                                         automatically the first time, when the db is empty)
+  python inventory.py reset             demo reset: payment / shipping / status back to the seed,
+                                        keeping emails and history (the control panel's Reset button)
   python inventory.py list              show packages
   python inventory.py add PKG-007 "Recipient Name" [--unpaid | --shipping express]
   python inventory.py pay PKG-001 standard        mark a package PAID with EXPRESS / STANDARD shipping
@@ -173,6 +175,22 @@ def init_from_seed(db: sqlite3.Connection, seed: Path = SEED_FILE) -> int:
     db.execute("DELETE FROM scans")
     db.executemany("INSERT INTO items (id, recipient, payment, shipping, sender_email, wrong_recipient_email) "
                    "VALUES (?, ?, ?, ?, ?, ?)", rows)
+    db.commit()
+    return len(rows)
+
+
+def reset_to_seed(db: sqlite3.Connection, seed: Path = SEED_FILE) -> int:
+    """For the demo: payment, shipping and status back to inventory_seed.csv (e.g. PKG-003 UNPAID again).
+    Keeps the emails (also ones given at checkout) and the scan / result history. Seed packages missing
+    from the database are added. Returns the number of packages reset."""
+    rows = read_seed(seed)
+    for pid, recipient, payment, shipping, email, wrong_email in rows:
+        if get_item(db, pid) is None:
+            db.execute("INSERT INTO items (id, recipient, payment, shipping, sender_email, wrong_recipient_email) "
+                       "VALUES (?, ?, ?, ?, ?, ?)", (pid, recipient, payment, shipping, email, wrong_email))
+        else:
+            db.execute("UPDATE items SET payment = ?, shipping = ?, status = NULL, updated = NULL WHERE id = ?",
+                       (payment, shipping, pid))
     db.commit()
     return len(rows)
 
@@ -438,6 +456,7 @@ def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="cmd", required=True)
     sub.add_parser("init")
+    sub.add_parser("reset")
     sub.add_parser("list")
     sub.add_parser("scans")
     sub.add_parser("next")
@@ -463,6 +482,9 @@ def main():
     db = connect_db()
     if args.cmd == "init":
         print(f"loaded {init_from_seed(db)} packages from {SEED_FILE.name} into {DB_FILE.name}")
+    elif args.cmd == "reset":
+        print(f"reset payment / shipping / status of {reset_to_seed(db)} packages to {SEED_FILE.name} "
+              "(emails and history kept)")
     elif args.cmd == "list":
         for r in all_items(db):
             print(f"  {r['id']:10} {r['recipient']:{MAX_NAME_LEN}}  "

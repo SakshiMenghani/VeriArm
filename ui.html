@@ -79,7 +79,9 @@
       <button class="secondary" data-mode="one">One package</button>
       <button class="secondary" data-mode="scan">Talk + scan only (no pick)</button>
       <button class="stop" id="stop" disabled>Stop</button>
+      <button class="secondary" id="reset" title="Payment, shipping and status back to inventory_seed.csv. Emails and history are kept.">Reset demo</button>
     </div>
+    <p class="note" id="resetMsg" hidden></p>
     <div class="state" id="state"><span class="dot"></span><span id="stateText">Idle</span></div>
     <div class="steps" id="steps"></div>
     <p class="note">VeriArm talks with the customer through this laptop's speaker and microphone: place a package in
@@ -95,6 +97,13 @@
   <section class="card">
     <h2>Live log</h2>
     <pre id="log"></pre>
+  </section>
+
+  <section class="card wide">
+    <h2>Packages</h2>
+    <div class="tablewrap"><table id="packages"><thead><tr>
+      <th>Package</th><th>Recipient</th><th>Payment</th><th>Shipping</th><th>Email</th><th>Last scan</th>
+    </tr></thead><tbody></tbody></table></div>
   </section>
 
   <section class="card wide">
@@ -156,9 +165,10 @@ async function poll() {
     $("stateText").textContent = LABELS[s.state] + (s.mode && s.state !== "idle" ? ` (${s.mode})` : "");
     const running = s.state === "running";
     document.querySelectorAll("button[data-mode]").forEach(b => b.disabled = running);
+    $("reset").disabled = running;
     $("stop").disabled = !running;
     renderSteps(s.state);
-    if (s.state !== lastState || running) { loadResult(); loadHistory(); }
+    if (s.state !== lastState || running) { loadResult(); loadHistory(); loadPackages(); }
     lastState = s.state;
   } catch (e) { $("stateText").textContent = "Can't reach the control server"; }
 }
@@ -201,6 +211,21 @@ async function loadHistory() {
     : `<tr><td colspan="10" class="empty">No scans yet.</td></tr>`;
 }
 
+async function loadPackages() {
+  const rows = await (await fetch("/items")).json();
+  $("packages").querySelector("tbody").innerHTML = rows.map(r => `<tr>
+    <td>${esc(r.id)}</td><td>${esc(r.recipient)}</td>
+    <td><span class="pill ${r.payment === "PAID" ? "green" : "orange"}">${esc(r.payment)}</span></td>
+    <td>${esc(r.shipping || "—")}</td><td>${esc(r.sender_email || "—")}</td><td>${esc(r.status || "—")}</td></tr>`).join("");
+}
+
+$("reset").onclick = async () => {
+  if (!confirm("Reset payment, shipping and status of all packages to the seed data? Emails and history are kept.")) return;
+  const j = await (await fetch("/reset", {method: "POST"})).json();
+  $("resetMsg").hidden = false; $("resetMsg").textContent = j.message;
+  loadPackages();
+};
+
 document.querySelectorAll("button[data-mode]").forEach(b => b.onclick = async () => {
   lines = []; since = 0; $("log").textContent = "";
   const r = await fetch("/run/start", {method: "POST", headers: {"Content-Type": "application/json"},
@@ -213,7 +238,7 @@ $("stop").onclick = async () => {
   await fetch("/run/stop", {method: "POST"}); poll();
 };
 
-poll(); loadResult(); loadHistory();
+poll(); loadResult(); loadHistory(); loadPackages();
 setInterval(poll, 1000);
 </script>
 </body>
