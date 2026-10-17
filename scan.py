@@ -43,7 +43,7 @@ from viam.robot.client import RobotClient
 import announce
 import find_pick
 from inspection import LAST_INSPECTION, RUNS, inspect_box
-from detect import TABLE_TOP_Z
+from detect import NoBoxError, TABLE_TOP_Z
 from inventory import record_detected, save_result, verify
 from zones import drop_center
 from robot import connect
@@ -55,7 +55,7 @@ async def scan(machine: RobotClient) -> dict | None:
     """Find + inspect + verify. Returns the result dict (see module docstring), or None if no box."""
     try:
         box_center = await find_pick.find_box(machine)
-    except LookupError as e:  # ZoneBlockedError / NoBoxError
+    except NoBoxError as e:
         print(f"No box: {e}")
         return None
     print(record_detected().say())

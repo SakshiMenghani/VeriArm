@@ -37,8 +37,8 @@ VIAM_API_KEY_ID=...
 - `make_labels.py`: printable QR label PDF from the inventory → `labels/labels.pdf`
 - `label_api.py`: HTTP API + web page for live QR generation (package id + recipient), adding packages, label PDFs, verify (http://localhost:8000)
 - `zones.py`: the green/orange drop zones (measured once with the camera, saved in `poses.json` with a reach-checked drop point). `--show` prints them; `--survey` / `--check-drops` re-measure if a sheet moves.
-- `ui.py`: **control panel** at http://localhost:8080: Start (one box / until the blue zone is empty / scan only), Stop, live progress + log, latest result with photos, history. Runs `main.py` on this laptop. Also serves the labels page at `/labels`.
-- `main.py`: the whole cycle: scan → pick → place in green/orange → announce. Motion prompts are off by default; `--confirm` enables them. `--dry-run` scans only; `--loop` runs until the blue zone is empty.
+- `ui.py`: **control panel** at http://localhost:8080: Start (continuous / one box / scan only), Stop, live progress + log, latest result with photos, history. Runs `main.py` on this laptop. Also serves the labels page at `/labels`.
+- `main.py`: the whole cycle: scan → pick → place in green/orange → announce, then return to `overview-blue` and continue scanning. Motion prompts are off by default; `--confirm` enables them. Use `--once` for one scan, `--max N` to stop after placing N boxes, or `--dry-run` to scan once without picking.
 - `scan.py`: `scan(machine)` = find → inspect 5 faces → verify; returns the result for pick/place and writes `runs/last_result.json` (local, not in git). Format examples: `examples/scan_result_*.json`.
 - `inspection.py`: `inspect_box()` reads the QR label from the box's visible faces; `--plan`, `--decode` run without motion.
 - `poses.py`: load saved poses in code, e.g. `get_pose("v_place")["joints"]` or `dict_to_pose(get_pose("v_place")["tip_world"])`

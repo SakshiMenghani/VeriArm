@@ -69,16 +69,16 @@ Measured on Oct 16 with the real box: top and three sides are reachable at the f
 - **Test:** jog the arm, pick a box with a manual suction command, test both drops and the notification.
 
 ### Control panel (Sakshi)
-- `python ui.py` → http://localhost:8080 (`--host 0.0.0.0` to open it from another laptop). **Start: one box** = `main.py`, **until blue zone is empty** = `--loop`, **Scan only** = `--dry-run`. Shows the steps (find → read label → verify → pick → place → done), the live log, the latest result (green/orange card, package, recipient, reason, face photos) and the history from `inventory.db`.
+- `python ui.py` → http://localhost:8080 (`--host 0.0.0.0` to open it from another laptop). **Start: continuous** = `main.py`, **one box** = `main.py --once`, **Scan only** = `--dry-run`. Shows the steps (find → read label → verify → pick → place → done), the live log, the latest result (green/orange card, package, recipient, reason, face photos) and the history from `inventory.db`.
 - **Stop** ends the run and sends `arm.stop()`. It does not turn the suction off (a carried box isn't dropped). The physical e-stop is still the real safety.
 
 ### main.py (Sakshi)
 - **Working end to end on the robot (Oct 16):** PKG-001 / Sakshi Menghani → ACCEPTED → picked, carried, placed in green (result #7); PKG-001 / Wrong Person (tall box) → REJECTED → placed in orange (result #8).
 - `place.py`: `place_box(machine, verified, drop_center)` carries the held box at 10 cm clearance, lowers it straight down to 1 cm above the zone, releases, backs off, returns to overview. `notify_done(result)` prints `result["say"]` (voice can go there). `python place.py --test-pick` / `--test-lift` are the grip checks used to debug the suction.
-- Connects once, then: `scan(machine)` → re-check the box position with `find_box(machine, move=False)` (the arm is back at overview after the scan) → `pick_box(machine, box_center)` → `place_box(machine, result["accepted"])` → `notify_done(result)`. `--loop` repeats until the blue zone is empty.
+- Connects once, then continuously repeats: `scan(machine)` → re-check the box position with `find_box(machine, move=False)` → `pick_box(machine, box_center)` → `place_box(machine, result["accepted"])` → `notify_done(result)`. `place_box` returns the arm to `overview-blue`; when the blue zone is empty, it waits and scans again. Use `--once` to process one scan.
 - **Yixin: put `place_box(machine, verified)` and `notify_done(result)` in `place.py`.** `main.py` imports them from there automatically. Until `place.py` exists, `main.py` scans and stops **before** picking (the arm never holds a box with nowhere to put it); `notify_done` falls back to printing `result["say"]`.
 - If the gripper isn't holding the box after `pick_box`, it releases suction, goes back to overview and stops.
-- `python main.py --dry-run` (scan only), `python main.py` (one box), `python main.py --loop`.
+- `python main.py --dry-run` (scan only), `python main.py` (continuous), `python main.py --once` (one scan).
 
 ## Labels & inventory
 

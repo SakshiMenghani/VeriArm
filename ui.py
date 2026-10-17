@@ -3,8 +3,8 @@
   python ui.py                  http://localhost:8080   (--host 0.0.0.0 to open it from another laptop)
 
 Start runs main.py on THIS laptop (it must have .env and reach the robot), exactly like:
-  one box        python main.py
-  until empty    python main.py --loop
+  continuously   python main.py
+  one box        python main.py --once
   scan only      python main.py --dry-run
 Stop ends the run and stops the arm where it is. It does NOT turn the suction off, so a box being
 carried isn't dropped. The physical e-stop is still the real safety.
@@ -32,8 +32,8 @@ LAST_RESULT = RUNS / "last_result.json"
 NOISE = ("INFO", "GRPC proxy", "dial.py")  # SDK chatter, not useful in the panel
 
 MODES = {
-    "one": [],
-    "loop": ["--loop"],
+    "one": ["--once"],
+    "loop": [],
     "scan": ["--dry-run"],
 }
 
