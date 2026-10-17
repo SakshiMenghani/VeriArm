@@ -80,15 +80,27 @@ def label_read(label_text: str | None) -> None:
         speak("I read a label, but it isn't a VeriArm label.")
 
 
+# Wording for announcements 4 and 5. "verified" = the sorting demo (main.py); "payment" = the checkout
+# conversation (checkout.py sets it), where an accepted package counts as paid (quick version: matches
+# inventory = paid; a proper paid column in the inventory comes later).
+WORDING = "verified"
+
+
 def verification(accepted: bool, reason: str = "") -> None:
     """4. scan.scan(): right after verify()."""
-    speak("Package verified." if accepted else f"Package not verified. {reason}.".replace("..", "."))
+    if WORDING == "payment":
+        speak("This package is paid." if accepted else "This package hasn't been paid yet.")
+    else:
+        speak("Package verified." if accepted else f"Package not verified. {reason}.".replace("..", "."))
 
 
 def moving_to(zone: str) -> None:
     """5. place.place_box(): right before carrying the box. zone is "green" or "orange"."""
-    area = "accepted" if zone == "green" else "rejected"
-    speak(f"Moving the package to the {area} area.")
+    if WORDING == "payment":
+        speak(f"Moving the package to the {zone} area.")
+    else:
+        area = "accepted" if zone == "green" else "rejected"
+        speak(f"Moving the package to the {area} area.")
 
 
 def spell_id(package_id: str) -> str:

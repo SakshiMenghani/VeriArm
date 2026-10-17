@@ -2,3 +2,5 @@ viam-sdk  # needs Python 3.10+ (team uses 3.12)
 opencv-python-headless  # QR decoding, image processing
 numpy
 pillow  # printable label PDFs
+sounddevice  # laptop microphone (voice commands)
+anthropic  # Claude: understanding spoken answers
