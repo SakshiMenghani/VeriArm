@@ -1,9 +1,9 @@
 """VeriArm main loop: scan the box in the blue zone, pick it, place it in green/orange, announce.
 
-  python main.py --dry-run     MOVES THE ARM (no pick): find + read label + verify, print where it would go
-  python main.py               one box; asks before each pick/place motion
-  python main.py --yes         one box, no questions (someone at the e-stop!)
-  python main.py --yes --loop  keep going until the blue zone is empty (max --max boxes)
+  python main.py                   continuously scan, pick, place, and return to overview-blue
+  python main.py --once            process one scan, then stop
+  python main.py --max 5           stop after placing 5 boxes
+  python main.py --dry-run         scan once without picking or placing
 
 Pieces (connect once here, pass `machine` to everyone):
   scan(machine)                       Sakshi  scan.py      -> result dict (see PLAN.md "Scan result"):
@@ -12,9 +12,8 @@ Pieces (connect once here, pass `machine` to everyone):
   place_box(machine, verified, drop)  place.py     carry to result["drop_center_pose"], set down, release
   notify_done(result)                 place.py     announce (prints result["say"] for now)
 
-Safety: if place_box doesn't exist yet, main.py stops after scanning and never picks the box up
-(the arm must never be left holding a box with nowhere to put it). If the pick doesn't hold the box (checked with
-the wrist camera, see grip_check.py), it releases suction, goes back to overview and stops.
+The drop routine returns the arm to overview-blue before the next scan. If no box is present, the
+loop waits briefly and scans again. Stop with Ctrl+C. Keep someone at the e-stop.
 """
 import argparse
 import asyncio
@@ -89,24 +88,36 @@ async def handle_one_box(machine: RobotClient, dry_run: bool) -> dict | None:
 
 async def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--yes", action="store_true", help="don't ask before each motion")
-    p.add_argument("--dry-run", action="store_true", help="scan + verify only, never pick")
-    p.add_argument("--loop", action="store_true", help="repeat until the blue zone is empty")
-    p.add_argument("--max", type=int, default=10, help="max boxes in --loop mode")
+    p.add_argument("--confirm", action="store_true", help="ask before each robot motion")
+    p.add_argument("--dry-run", action="store_true", help="scan + verify once, never pick or place")
+    p.add_argument("--once", action="store_true", help="process one scan, then stop")
+    p.add_argument("--loop", action="store_true", help="compatibility option; continuous scanning is the default")
+    p.add_argument("--max", type=int, help="stop after placing this many boxes (default: no limit)")
+    p.add_argument("--poll-interval", type=float, default=3.0,
+                   help="seconds to wait before retrying when the blue zone is empty (default: 3)")
     args = p.parse_args()
-    find_pick.ASK_BEFORE_MOVING = not args.yes
+    find_pick.ASK_BEFORE_MOVING = args.confirm
 
     done = []
     async with await connect() as machine:
         announce.intro()  # announcement 1 (see announce.py)
-        for _ in range(args.max if args.loop else 1):
+        while True:
             result = await handle_one_box(machine, args.dry_run)
             if result is None:
-                print("[main] blue zone is empty.")
-                break
+                print("[main] blue zone is empty; scanning again soon.")
+                if args.once or args.dry_run:
+                    break
+                await asyncio.sleep(max(0.0, args.poll_interval))
+                continue
             done.append(result)
             if args.dry_run or place_box is None:
-                break  # the box didn't move: scanning again would find the same box
+                break  # the box did not move, so another scan would find it again
+            if args.max is not None and len(done) >= args.max:
+                print(f"[main] reached the limit of {args.max} placed box(es).")
+                break
+            if args.once:
+                break
+            print("[main] ready for the next package at overview-blue.")
 
     if len(done) > 1:
         print("\n[main] summary:")
