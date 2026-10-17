@@ -290,8 +290,21 @@ FIXED_LINES = [  # generated in the background at start, so they play without de
 ]
 
 
+def package_lines() -> list[str]:
+    """Per-package sentences (label read, email) from the inventory, generated at start like FIXED_LINES,
+    so they don't take ~1.5 s of ElevenLabs time in the middle of the conversation."""
+    from inventory import all_items, connect_db
+    db = connect_db()
+    try:
+        items = all_items(db)
+    finally:
+        db.close()
+    lines = [f"Label read: package {announce.spell_id(r['id'])}, for {r['recipient']}." for r in items]
+    return lines + [f"Sending it to {spoken_email(r['sender_email'])}." for r in items if r["sender_email"]]
+
+
 async def conversation(machine, args) -> None:
-    announce.prepare(FIXED_LINES)
+    announce.prepare(FIXED_LINES + package_lines())
     if not args.type:
         import voice_input
         voice_input.calibrate()  # measure the room while it's quiet, before VeriArm starts talking
@@ -301,7 +314,7 @@ async def conversation(machine, args) -> None:
         if not await handle_package(machine, args):
             continue  # the box was gone by the time we scanned: wait for one again
         handled += 1
-        if args.simulate or args.once or (args.max and handled >= args.max):
+        if args.once or (args.max and handled >= args.max):  # --simulate asks too (yes: the same test package again)
             break
         more = choose("Do you have another package to send?", YES_NO, args.type)
         if more == "no":
