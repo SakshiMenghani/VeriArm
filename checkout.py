@@ -21,6 +21,9 @@ Stage 1: the email is only announced (sending: stage 2); the card tap is confirm
   python checkout.py --simulate PKG-003    no robot: test the conversation for this package
                                            (PKG-001 paid, PKG-003 unpaid, PKG-006 recalled, NONE no label)
   python checkout.py --type ...            type your answers instead of speaking them
+  python checkout.py --once                one package, then goodbye (--max N: stop after N packages)
+
+main.py runs this conversation by default (python main.py --classic = the old verified / rejected sorting).
 
 Email address: VERIARM_NOTIFY_EMAIL in .env.
 """
@@ -200,13 +203,17 @@ async def conversation(machine, args) -> None:
         import voice_input
         voice_input.calibrate()  # measure the room while it's quiet, before VeriArm starts talking
     announce.intro()
+    handled = 0
     while True:
         if not await handle_package(machine, args):
             if choose("I don't see a package in the blue zone. Please place one, then say ready.",
                       READY, args.type) != "ready":
                 break
             continue
-        if args.simulate or choose("Would you like to place another package?", YES_NO, args.type) != "yes":
+        handled += 1
+        if args.simulate or args.once or (args.max and handled >= args.max):
+            break
+        if choose("Would you like to place another package?", YES_NO, args.type) != "yes":
             break
         if choose("Great. Place it in the blue zone, then say ready.", READY, args.type) != "ready":
             break
@@ -219,6 +226,8 @@ async def main():
     p.add_argument("--no-pick", action="store_true", help="scan and talk, but never pick the box up")
     p.add_argument("--simulate", metavar="PACKAGE", help="no robot: PKG-001, PKG-003, PKG-006, NONE ...")
     p.add_argument("--type", action="store_true", help="type answers instead of speaking them")
+    p.add_argument("--once", action="store_true", help="one package, then goodbye")
+    p.add_argument("--max", type=int, help="stop after this many packages")
     args = p.parse_args()
     announce.WORDING = "checkout"
 

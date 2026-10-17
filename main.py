@@ -1,9 +1,17 @@
-"""VeriArm main loop: scan the box in the blue zone, pick it, place it in green/orange, announce.
+"""VeriArm main loop. By default: the voice CHECKOUT (checkout.py): VeriArm talks with you at the blue zone
+(paid / unpaid / unidentified, payment, Standard or Express shipping, email notification), then moves
+the box: Standard -> green zone, Express -> orange zone.
 
-  python main.py                   continuously scan, pick, place, and return to overview-blue
-  python main.py --once            process one scan, then stop
-  python main.py --max 5           stop after placing 5 boxes
-  python main.py --dry-run         scan once without picking or placing
+  python main.py                   checkout conversation, package after package ("another package?")
+  python main.py --once            one package, then goodbye
+  python main.py --max 5           stop after 5 packages
+  python main.py --dry-run         one package: talk and scan, but never pick or place
+  python main.py --type            type your answers instead of speaking them
+
+  python main.py --classic         the previous sorting flow: verified -> green, not verified -> orange,
+                                   continuously scanning (--once, --max, --dry-run, --poll-interval apply)
+
+Classic flow:
 
 Pieces (connect once here, pass `machine` to everyone):
   scan(machine)                       Sakshi  scan.py      -> result dict (see PLAN.md "Scan result"):
@@ -94,9 +102,20 @@ async def main():
     p.add_argument("--loop", action="store_true", help="compatibility option; continuous scanning is the default")
     p.add_argument("--max", type=int, help="stop after placing this many boxes (default: no limit)")
     p.add_argument("--poll-interval", type=float, default=3.0,
-                   help="seconds to wait before retrying when the blue zone is empty (default: 3)")
+                   help="classic: seconds to wait before retrying when the blue zone is empty (default: 3)")
+    p.add_argument("--classic", action="store_true", help="the previous sorting flow (verified / not verified)")
+    p.add_argument("--type", action="store_true", help="checkout: type answers instead of speaking them")
     args = p.parse_args()
     find_pick.ASK_BEFORE_MOVING = args.confirm
+
+    if not args.classic:  # the voice checkout (checkout.py)
+        import checkout
+        announce.WORDING = "checkout"
+        talk = argparse.Namespace(simulate=None, type=args.type, no_pick=args.dry_run,
+                                  once=args.once or args.dry_run, max=args.max)
+        async with await connect() as machine:
+            await checkout.conversation(machine, talk)
+        return
 
     done = []
     async with await connect() as machine:
