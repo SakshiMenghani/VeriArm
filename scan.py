@@ -44,7 +44,7 @@ import announce
 import find_pick
 from inspection import LAST_INSPECTION, RUNS, inspect_box
 from detect import NoBoxError, TABLE_TOP_Z
-from inventory import record_detected, save_result, verify
+from inventory import payment_for, record_detected, save_result, sender_email_for, verify
 from zones import drop_center
 from robot import connect
 
@@ -81,6 +81,8 @@ async def scan(machine: RobotClient) -> dict | None:
         "reason": r.reason,
         "package_id": r.package_id,
         "recipient": r.recipient,
+        "payment": payment_for(r.accepted),          # PAID / UNPAID
+        "sender_email": sender_email_for(r.recipient),  # who to notify (contacts_seed.csv), None if unknown
         "label_text": text,
         "label_face": report.get("found_on"),
         "box_center": {"x": round(box_center.x, 1), "y": round(box_center.y, 1), "z": round(box_center.z, 1),

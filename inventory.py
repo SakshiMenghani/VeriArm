@@ -7,6 +7,8 @@ Label format (what the QR code encodes):  VA1|<package id>|<recipient>   e.g.  V
   - "VA1" marks it as one of our labels (format version 1), so random QR codes are not mistaken for packages.
   - Keep recipient names short (<= 24 chars): longer text = denser QR = harder to read from the arm camera.
 A package is ACCEPTED only if its id is in the inventory, the recipient on the label matches, and it's expected.
+Payment: ACCEPTED = PAID, REJECTED = UNPAID. Each result also stores the sender_email for the label's recipient
+name (contacts table, seeded from contacts_seed.csv), so the notification knows whom to email.
 
   python inventory.py init              reload inventory.db from inventory_seed.csv (also happens
                                         automatically the first time, when the db is empty)
@@ -16,6 +18,8 @@ A package is ACCEPTED only if its id is in the inventory, the recipient on the l
   python inventory.py scans             show the scan log
   python inventory.py next              the next scanned box waiting to be placed (zone + box_center)
   python inventory.py results           recent scan results and whether they were placed
+  python inventory.py contacts          show recipient name -> sender email
+  python inventory.py contact "Name" someone@example.com   add or change one
 """
 import argparse
 import csv
@@ -28,6 +32,7 @@ from pathlib import Path
 ROOT = Path(__file__).parent
 DB_FILE = ROOT / "inventory.db"
 SEED_FILE = ROOT / "inventory_seed.csv"
+CONTACTS_FILE = ROOT / "contacts_seed.csv"
 
 PREFIX = "VA1"
 SEP = "|"
@@ -93,7 +98,14 @@ def connect_db(path: Path = DB_FILE) -> sqlite3.Connection:
             box_x REAL, box_y REAL, box_z REAL, box_theta REAL,  -- box_center: world mm, z = box top, theta = box yaw
             drop_x REAL, drop_y REAL, drop_z REAL,               -- drop_center: where to put it (z = box top there)
             say        TEXT,
-            placed_at  TEXT               -- NULL until the box has been put in its zone
+            placed_at  TEXT,              -- NULL until the box has been put in its zone
+            payment    TEXT,              -- PAID (accepted) / UNPAID (rejected)
+            sender_email TEXT             -- email for the label's recipient name (contacts), NULL if unknown
+        );
+        -- Recipient name (as printed on the label) -> email to notify. Seeded from contacts_seed.csv.
+        CREATE TABLE IF NOT EXISTS contacts (
+            name         TEXT PRIMARY KEY,
+            sender_email TEXT NOT NULL
         );
     """)
     cols = {r["name"] for r in db.execute("PRAGMA table_info(items)")}
@@ -102,6 +114,16 @@ def connect_db(path: Path = DB_FILE) -> sqlite3.Connection:
     for col in ("drop_x", "drop_y", "drop_z"):  # results table from before drop_center existed
         if col not in result_cols:
             db.execute(f"ALTER TABLE results ADD COLUMN {col} REAL")
+    if db.execute("SELECT COUNT(*) FROM contacts").fetchone()[0] == 0 and CONTACTS_FILE.exists():
+        load_contacts(db)
+    new_cols = [c for c in ("payment", "sender_email") if c not in result_cols]
+    for col in new_cols:  # results table from before payment / sender_email existed: add and fill in old rows
+        db.execute(f"ALTER TABLE results ADD COLUMN {col} TEXT")
+    if new_cols:
+        for row in db.execute("SELECT result_id, accepted, recipient FROM results").fetchall():
+            db.execute("UPDATE results SET payment = ?, sender_email = ? WHERE result_id = ?",
+                       (payment_for(bool(row["accepted"])), sender_email_for(row["recipient"], db), row["result_id"]))
+        db.commit()
     if not {"status", "recipient"} <= cols or not {"status", "recipient"} <= scan_cols:
         db.close()  # db from an older version: rebuild (it's local)
         path.unlink()
@@ -123,7 +145,44 @@ def init_from_seed(db: sqlite3.Connection, seed: Path = SEED_FILE) -> int:
     db.execute("DELETE FROM scans")
     db.executemany("INSERT INTO items (id, recipient, expected) VALUES (?, ?, ?)", rows)
     db.commit()
+    if CONTACTS_FILE.exists():
+        load_contacts(db)
     return len(rows)
+
+
+def load_contacts(db: sqlite3.Connection, seed: Path = CONTACTS_FILE) -> int:
+    """Replace the contacts table with contacts_seed.csv."""
+    with seed.open(newline="") as f:
+        rows = [(r["name"].strip(), r["sender_email"].strip()) for r in csv.DictReader(f)]
+    db.execute("DELETE FROM contacts")
+    db.executemany("INSERT INTO contacts (name, sender_email) VALUES (?, ?)", rows)
+    db.commit()
+    return len(rows)
+
+
+def set_contact(db: sqlite3.Connection, name: str, sender_email: str) -> None:
+    db.execute("INSERT OR REPLACE INTO contacts (name, sender_email) VALUES (?, ?)", (name.strip(), sender_email.strip()))
+    db.commit()
+
+
+def sender_email_for(name: str | None, db: sqlite3.Connection | None = None) -> str | None:
+    """Email for a recipient name (case- and spacing-insensitive), None if unknown."""
+    if not name:
+        return None
+    db, own = _connect_or(db)
+    try:
+        for row in db.execute("SELECT name, sender_email FROM contacts"):
+            if same_name(row["name"], name):
+                return row["sender_email"]
+        return None
+    finally:
+        if own:
+            db.close()
+
+
+def payment_for(accepted: bool) -> str:
+    """ACCEPTED -> PAID, REJECTED -> UNPAID."""
+    return "PAID" if accepted else "UNPAID"
 
 
 def add_item(db: sqlite3.Connection, package_id: str, recipient: str, expected: bool = True) -> str:
@@ -247,12 +306,14 @@ def save_result(result: dict, db: sqlite3.Connection | None = None) -> int:
         d = result.get("drop_center") or {}
         cur = db.execute(
             "INSERT INTO results (ts, status, zone, accepted, package_id, recipient, reason, label_face, "
-            "box_x, box_y, box_z, box_theta, drop_x, drop_y, drop_z, say) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "box_x, box_y, box_z, box_theta, drop_x, drop_y, drop_z, say, payment, sender_email) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (result.get("time") or datetime.now().isoformat(timespec="seconds"), result["status"], result["zone"],
              1 if result["accepted"] else 0, result.get("package_id"), result.get("recipient"), result["reason"],
              result.get("label_face"), c["x"], c["y"], c["z"], c["theta"],
-             d.get("x"), d.get("y"), d.get("z"), result.get("say")))
+             d.get("x"), d.get("y"), d.get("z"), result.get("say"),
+             result.get("payment") or payment_for(result["accepted"]),
+             result.get("sender_email") or sender_email_for(result.get("recipient"), db)))
         db.commit()
         return cur.lastrowid
     finally:
@@ -302,6 +363,10 @@ def main():
     sub.add_parser("scans")
     sub.add_parser("next")
     sub.add_parser("results")
+    sub.add_parser("contacts")
+    ct = sub.add_parser("contact")
+    ct.add_argument("name")
+    ct.add_argument("sender_email")
     a = sub.add_parser("add")
     a.add_argument("id")
     a.add_argument("recipient")
@@ -336,8 +401,15 @@ def main():
             print(f"  drop_center: x={dc['x']} y={dc['y']} z={dc['z']}   (where to put it)")
     elif args.cmd == "results":
         for r in db.execute("SELECT * FROM results ORDER BY result_id DESC LIMIT 20"):
-            print(f"  #{r['result_id']:<3} {r['ts']}  {r['status']:8} -> {r['zone']:6}  {r['package_id'] or '-':10}"
+            print(f"  #{r['result_id']:<3} {r['ts']}  {r['status']:8} {r['payment'] or '-':6} -> {r['zone']:6}"
+                  f"  {r['package_id'] or '-':10}  {r['sender_email'] or '-':28}"
                   f"  placed: {r['placed_at'] or 'NO'}   {r['reason']}")
+    elif args.cmd == "contacts":
+        for r in db.execute("SELECT * FROM contacts ORDER BY name"):
+            print(f"  {r['name']:{MAX_NAME_LEN}}  {r['sender_email']}")
+    elif args.cmd == "contact":
+        set_contact(db, args.name, args.sender_email)
+        print(f"set {args.name} -> {args.sender_email}")
     elif args.cmd == "scans":
         for r in db.execute("SELECT * FROM scans ORDER BY rowid DESC LIMIT 30"):
             print(f"  {r['ts']}  {r['status']:8}  {r['id'] or '-':10} {r['recipient'] or '-':{MAX_NAME_LEN}}"
