@@ -60,6 +60,7 @@ async def scan(machine: RobotClient) -> dict | None:
         return None
     print(record_detected().say())
 
+    announce.checking_label()  # announcement 2b (see announce.py)
     text = await inspect_box(machine, box_center)  # 5 visible faces, no picking up
     announce.label_read(text)  # announcement 3 (see announce.py)
     report = json.loads(LAST_INSPECTION.read_text())

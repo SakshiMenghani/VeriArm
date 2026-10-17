@@ -11,6 +11,7 @@ To change wording, edit the functions below; to move or remove an announcement, 
   1  program starts                 intro()                      main.py      main(), right after connecting
   2  looked in the blue zone        package_detected(box_name)   find_pick.py find_box(), box found
                                     no_package(error)            find_pick.py find_box(), no box / zone blocked
+  2b about to read the label       checking_label()             scan.py      scan(), right before inspect_box()
   3  QR code read (or not)          label_read(label_text)       scan.py      scan(), right after inspect_box()
   4  checked against the inventory  verification(accepted, why)  scan.py      scan(), right after verify()
                                     (silent in checkout.py, which says paid / unpaid / unidentified itself)
@@ -72,6 +73,12 @@ def no_package(error: Exception | None = None) -> None:
         speak_once("I can't see the blue zone clearly. Please clear it.", key="zone")
     else:
         speak_once("No package detected.", key="zone")
+
+
+def checking_label() -> None:
+    """2b. scan.scan(): right before inspect_box(). Fills the quiet while the camera moves to the label and
+    reads it. Plays in the background so the arm doesn't wait for it."""
+    speak("Checking the label.", wait=False)
 
 
 def label_read(label_text: str | None) -> None:
@@ -331,6 +338,7 @@ def play_script() -> None:
     intro()
     package_detected("large")
     package_detected("unknown")
+    checking_label()
     label_read("VA1|PKG-001|Sakshi Menghani")
     verification(True)
     moving_to("green")

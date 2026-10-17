@@ -133,6 +133,7 @@ def simulated_result(package: str) -> dict:
     """A scan result without the robot, for --simulate."""
     pid = None if package.upper() == "NONE" else package.upper()
     announce.package_detected("large")
+    announce.checking_label()
     announce.label_read(f"VA1|{pid}|Test Person" if pid else None)
     return {"accepted": pid in SIMULATED_INVENTORY, "package_id": pid,
             "reason": "Matches inventory" if pid in SIMULATED_INVENTORY else "Not expected"}
@@ -179,7 +180,7 @@ async def handle_package(machine, args) -> bool:
 
 FIXED_LINES = [  # generated in the background at start, so they play without delay (ElevenLabs voice)
     "Hello, this is VeriArm. I'll be here to help you sort packages whenever you are ready.",
-    "Package detected: the large box.", "Package detected: the tall box.",
+    "Package detected: the large box.", "Package detected: the tall box.", "Checking the label.",
     "This package is paid, with Standard shipping.", "This package is paid, with Express shipping.",
     "This package hasn't been paid yet. Which shipping would you like? Standard for 5 dollars, "
     "or Express for 12 dollars.",
