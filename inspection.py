@@ -49,9 +49,15 @@ RUNS = Path(__file__).parent / "runs"
 LAST_INSPECTION = RUNS / "last_inspection.json"
 
 TOP_STANDOFF = 250  # mm camera -> top face
-# (elevation deg above horizontal, standoff mm) per side, tried in order. Shallow = best for reading;
-# steep + close = the only way to see a side that faces the wall.
-SIDE_VIEWS = ((25, 260), (40, 250), (55, 220), (65, 190), (65, 240), (75, 230), (75, 170))
+# (camera elevation above horizontal in degrees, distance from face center in mm), tried in order.
+# Higher elevation raises the camera while it looks down at the face. +x uses the fixed calibrated pose below.
+SIDE_VIEWS = ((30, 260), (40, 250), (55, 220), (65, 190), (65, 240), (75, 230), (75, 170))
+# Camera pose tested successfully on the current table: reached and decoded VA1|PKG-003|Yixin.
+# This is a fixed world pose, so it assumes the box stays in the calibrated inspection area.
+PLUS_X_CAMERA_POSE = Pose(
+    x=609.94474841, y=100.91668904, z=196.707693716,
+    o_x=-0.862934, o_y=0.0000139, o_z=-0.505316, theta=82.161834,
+)
 ROLL_STEPS = (0, 30, -30, 60, -60, 90, -90)  # camera roll changes to try, relative to the current roll
 OBSTACLE_PAD = 15       # mm added around the box for planning
 SETTLE_S = 0.6
@@ -122,8 +128,11 @@ class View:
     look: np.ndarray         # unit look direction (camera +z) in world
     standoff: float
     elevation: float | None  # deg, None for top
+    fixed_camera_pose: Pose | None = None  # explicit world pose for calibrated viewpoints
 
     def camera_pose(self, theta: float) -> Pose:
+        if self.fixed_camera_pose is not None:
+            return self.fixed_camera_pose
         p = self.target - self.look * self.standoff
         return Pose(x=p[0], y=p[1], z=p[2], o_x=self.look[0], o_y=self.look[1], o_z=self.look[2], theta=theta)
 
@@ -163,6 +172,10 @@ def plan_views(det: BoxDetection) -> list[list[View]]:
     views = [[View("top", np.array([c[0], c[1], TABLE_TOP_Z + h]), np.array([0.0, 0, -1]), TOP_STANDOFF, None)]]
     for name, fc, n in side_faces(det):
         cands = []
+        if name == "+x side":
+            cands.append(View(name, fc, n, 0.0, None, PLUS_X_CAMERA_POSE))
+            views.append(cands)
+            continue
         for el, standoff in SIDE_VIEWS:
             e = math.radians(el)
             look = -(n * math.cos(e)) + np.array([0, 0, -math.sin(e)])
@@ -195,6 +208,16 @@ def wrap(deg: float) -> float:
 
 async def move_to_view(motion: MotionClient, view: View, world: WorldState) -> float | None:
     """Move the camera to the view, keeping its roll close to the current one. Returns theta or None."""
+    if view.fixed_camera_pose is not None:
+        try:
+            await motion.move(
+                component_name=CAMERA,
+                destination=PoseInFrame(reference_frame="world", pose=view.fixed_camera_pose),
+                world_state=world,
+            )
+            return view.fixed_camera_pose.theta
+        except Exception:
+            return None
     current = (await motion.get_pose(CAMERA, "world")).pose.theta
     for step in ROLL_STEPS:
         theta = wrap(current + step)
@@ -209,7 +232,7 @@ async def move_to_view(motion: MotionClient, view: View, world: WorldState) -> f
 
 
 async def capture_face(machine: RobotClient, cands: list[View], world: WorldState, out_dir: Path,
-                       tag: str) -> dict:
+                       tag: str, top_view: View) -> dict:
     """Visit the face's views in order. Stops at a decoded label, or at the first reached view that shows
     no QR-like pattern at all. If a pattern is seen but unreadable, tries the next view.
     Returns the face record (best view first in 'views')."""
@@ -218,35 +241,50 @@ async def capture_face(machine: RobotClient, cands: list[View], world: WorldStat
     face = cands[0].face
     rec = {"face": face, "reached": False, "text": None, "qr_shapes": 0, "image": None, "views": []}
     for view in cands:
-        label = face if view.elevation is None else f"{face} @{view.elevation:.0f}deg {view.standoff:.0f}mm"
+        if view.fixed_camera_pose is not None:
+            p = view.fixed_camera_pose
+            label = f"{face} @ fixed camera pose ({p.x:.0f}, {p.y:.0f}, {p.z:.0f} mm)"
+        else:
+            label = face if view.elevation is None else f"{face} @{view.elevation:.0f}deg {view.standoff:.0f}mm"
         print(f"[inspect] {label}")
         theta = await move_to_view(motion, view, world)
         if theta is None:
             print("[inspect]   unreachable")
-            rec["views"].append({"elevation": view.elevation, "standoff": view.standoff, "reached": False})
+            rec["views"].append({"elevation": view.elevation, "standoff": view.standoff,
+                                  "fixed_camera_pose": view.fixed_camera_pose is not None, "reached": False})
+            if face != "top":
+                await return_to_top(motion, top_view, world)
             continue
-        await asyncio.sleep(SETTLE_S)
-        cam_pose = (await motion.get_pose(CAMERA, "world")).pose
-        text, frame, center, shapes = None, None, None, 0
-        for _ in range(FRAMES_PER_VIEW):
-            frame, center = await grab(cam)
-            if frame is None:
-                continue
-            if text := decode_qr(frame):
-                break
-            shapes = max(shapes, qr_shapes(frame))
-        img = f"{tag}_{face.replace(' ', '_')}_{view.elevation or 90:.0f}deg_{view.standoff:.0f}mm.jpg"
-        if frame is not None:
-            cv2.imwrite(str(out_dir / img), frame)
-        v = {"elevation": view.elevation, "standoff": view.standoff, "reached": True, "theta": round(theta, 1),
-             "camera": [round(cam_pose.x), round(cam_pose.y), round(cam_pose.z)],
-             "center_depth_mm": None if center is None else round(center),
-             "text": text, "qr_shapes": shapes, "image": img}
-        rec["views"].append(v)
-        # the face's headline image: a decoded one, else one with a QR-like pattern, else the first reached
-        if text or (shapes and not rec["text"] and not rec["qr_shapes"]) or not rec["reached"]:
-            rec.update({"reached": True, "text": text, "qr_shapes": shapes, "image": img,
-                        "elevation": view.elevation, "camera": v["camera"]})
+        try:
+            await asyncio.sleep(SETTLE_S)
+            cam_pose = (await motion.get_pose(CAMERA, "world")).pose
+            text, frame, center, shapes = None, None, None, 0
+            for _ in range(FRAMES_PER_VIEW):
+                frame, center = await grab(cam)
+                if frame is None:
+                    continue
+                if text := decode_qr(frame):
+                    break
+                shapes = max(shapes, qr_shapes(frame))
+            suffix = ("fixed_pose" if view.fixed_camera_pose is not None
+                      else f"{view.elevation or 90:.0f}deg_{view.standoff:.0f}mm")
+            img = f"{tag}_{face.replace(' ', '_')}_{suffix}.jpg"
+            if frame is not None:
+                cv2.imwrite(str(out_dir / img), frame)
+            v = {"elevation": view.elevation, "standoff": view.standoff, "reached": True,
+                 "theta": round(theta, 1), "fixed_camera_pose": view.fixed_camera_pose is not None,
+                 "camera": [round(cam_pose.x), round(cam_pose.y), round(cam_pose.z)],
+                 "center_depth_mm": None if center is None else round(center),
+                 "text": text, "qr_shapes": shapes, "image": img}
+            rec["views"].append(v)
+            # the face's headline image: a decoded one, else one with a QR-like pattern, else the first reached
+            if text or (shapes and not rec["text"] and not rec["qr_shapes"]) or not rec["reached"]:
+                rec.update({"reached": True, "text": text, "qr_shapes": shapes, "image": img,
+                            "elevation": view.elevation, "camera": v["camera"],
+                            "fixed_camera_pose": view.fixed_camera_pose is not None})
+        finally:
+            if face != "top":
+                await return_to_top(motion, top_view, world)
         if text:
             print(f"[inspect]   LABEL: {text!r}  ({img})")
             return rec
@@ -256,6 +294,13 @@ async def capture_face(machine: RobotClient, cands: list[View], world: WorldStat
         print(f"[inspect]   no QR ({img})")
         return rec
     return rec
+
+
+async def return_to_top(motion: MotionClient, top_view: View, world: WorldState) -> None:
+    """Retract to the overhead camera pose after a side-view attempt."""
+    print("[inspect]   returning to the overhead top position")
+    if await move_to_view(motion, top_view, world) is None:
+        raise RuntimeError("Could not retract to the overhead top position after a side view")
 
 
 def contact_sheet(out_dir: Path, records: list[dict]) -> Path:
@@ -304,9 +349,11 @@ async def inspect_faces(machine: RobotClient, det: BoxDetection, out_dir: Path, 
     """Visit faces in order; stop as soon as one has a valid VeriArm label (other QR codes don't stop it)."""
     world = box_obstacle(det)
     records = []
-    for i, cands in enumerate(plan_views(det), start=1):
+    planned = plan_views(det)
+    top_view = planned[0][0]
+    for i, cands in enumerate(planned, start=1):
         if only is None or cands[0].face in only:
-            rec = await capture_face(machine, cands, world, out_dir, f"{tag}{i}")
+            rec = await capture_face(machine, cands, world, out_dir, f"{tag}{i}", top_view)
             records.append(rec)
             if rec.get("text") and parse_label_text(rec["text"]):
                 break
@@ -357,7 +404,9 @@ async def inspect_box(machine: RobotClient, box_center: Pose, allow_turn: bool =
         else:
             what = ("LABEL " + repr(r["text"]) if r["text"]
                     else "label seen, NOT readable" if r["qr_shapes"] else "no label")
-            print(f"  {r['face']:8}  {what:40} el={r['elevation'] or 90} cam={r['camera']}")
+            view_desc = (f"fixed camera pose cam={r['camera']}" if r.get("fixed_camera_pose")
+                         else f"el={r['elevation'] or 90} cam={r['camera']}")
+            print(f"  {r['face']:8}  {what:40} {view_desc}")
     print(f"  contact sheet: {sheet}")
     return report["result"]
 
@@ -387,8 +436,12 @@ async def main():
             for cands in plan_views(det):
                 for v in cands:
                     q = v.camera_pose(0)
-                    print(f"  {v.face:8} el={v.elevation or 90:>3} standoff={v.standoff:.0f}  "
-                          f"cam=({q.x:.0f}, {q.y:.0f}, {q.z:.0f})")
+                    if v.fixed_camera_pose is not None:
+                        print(f"  {v.face:8} fixed cam=({q.x:.1f}, {q.y:.1f}, {q.z:.1f})  "
+                              f"theta={q.theta:.2f}")
+                    else:
+                        print(f"  {v.face:8} el={v.elevation or 90:>3} standoff={v.standoff:.0f}  "
+                              f"cam=({q.x:.0f}, {q.y:.0f}, {q.z:.0f})")
             return
         box_center = await find_pick.find_box(machine)
         result = await inspect_box(machine, box_center, allow_turn=args.turn, only=only)
