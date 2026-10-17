@@ -26,7 +26,8 @@ checkout marks the package PAID there. The email is sent by notify.py (SMTP sett
 
 main.py runs this conversation by default (python main.py --classic = the old verified / rejected sorting).
 
-Email address: VERIARM_NOTIFY_EMAIL in .env.
+Email address: the package's sender_email in the inventory database (inventory_seed.csv; a package
+without one gets asked for an email by voice, which is then saved to the database).
 """
 import argparse
 import asyncio
@@ -54,12 +55,6 @@ def choose(question: str, choices: dict[str, str], typed: bool, retry: str | Non
         if choice != "unclear":
             return choice
     return None
-
-
-def notify_email() -> str:
-    from robot import _load_env
-    _load_env()
-    return os.environ.get("VERIARM_NOTIFY_EMAIL", "").strip()
 
 
 def spoken_email(email: str) -> str:
@@ -112,7 +107,7 @@ def ask_new_email(typed: bool) -> str | None:
 
 def offer_notification(typed: bool, result: dict, shipping: str, paid_now: bool = False,
                        simulate: bool = False) -> None:
-    """Email the package's sender_email (inventory; falls back to VERIARM_NOTIFY_EMAIL in .env) via notify.py.
+    """Email the package's sender_email from the inventory (asks for one by voice if it has none) via notify.py.
     simulate: say it, but don't send."""
     answer = choose("Would you like the notification sent to your email?", YES_NO, typed)
     if answer == "no":
@@ -121,7 +116,7 @@ def offer_notification(typed: bool, result: dict, shipping: str, paid_now: bool 
     if answer != "yes":  # unclear twice: don't send, and say so
         announce.speak("Okay, I'll skip the notification.")
         return
-    email = result.get("sender_email") or notify_email()
+    email = result.get("sender_email")  # only from the inventory database
     if not email:
         email = ask_new_email(typed)
         if not email:

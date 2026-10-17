@@ -181,16 +181,17 @@ def init_from_seed(db: sqlite3.Connection, seed: Path = SEED_FILE) -> int:
 
 def reset_to_seed(db: sqlite3.Connection, seed: Path = SEED_FILE) -> int:
     """For the demo: payment, shipping and status back to inventory_seed.csv (e.g. PKG-003 UNPAID again).
-    Keeps the emails (also ones given at checkout) and the scan / result history. Seed packages missing
-    from the database are added. Returns the number of packages reset."""
+    Keeps the emails (also ones given at checkout) and the scan / result history; a package with no email
+    gets the seed's. Seed packages missing from the database are added. Returns the number of packages reset."""
     rows = read_seed(seed)
     for pid, recipient, payment, shipping, email, wrong_email in rows:
         if get_item(db, pid) is None:
             db.execute("INSERT INTO items (id, recipient, payment, shipping, sender_email, wrong_recipient_email) "
                        "VALUES (?, ?, ?, ?, ?, ?)", (pid, recipient, payment, shipping, email, wrong_email))
         else:
-            db.execute("UPDATE items SET payment = ?, shipping = ?, status = NULL, updated = NULL WHERE id = ?",
-                       (payment, shipping, pid))
+            db.execute("UPDATE items SET payment = ?, shipping = ?, status = NULL, updated = NULL, "
+                       "sender_email = COALESCE(NULLIF(sender_email, ''), ?) WHERE id = ?",
+                       (payment, shipping, email, pid))
     db.commit()
     return len(rows)
 
