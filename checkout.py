@@ -9,7 +9,8 @@ Per package, at the blue zone:
            -> "Payment accepted."   (cancelled -> "This package stays here until it's paid." -> no move)
   "Would you like the notification sent to your email?" -> "Sending it to <email>."
 then:   pick -> Standard -> green zone, Express -> orange zone
-        "Would you like to place another package?" -> next package, or "Thanks, goodbye!"
+        "Do you have another package to send?" -> yes: place it in the blue scan area, same process again;
+        no: "Thank you, goodbye!"   (no email on file: offers to take one, saves it to the package, sends)
 
 Paid status, shipping and the email come from the inventory database (inventory_seed.csv); paying at
 checkout marks the package PAID there. The email is sent by notify.py (SMTP settings in .env); the card tap is confirmed by saying "done"
@@ -32,7 +33,7 @@ import asyncio
 import os
 
 import announce
-from understand import understand
+from understand import understand, understand_email
 from voice_input import ask
 
 # Paid status, shipping and the notification email come from the inventory database (inventory_seed.csv).
@@ -89,6 +90,26 @@ def take_payment(typed: bool) -> str | None:
     return ship
 
 
+def ask_new_email(typed: bool) -> str | None:
+    """No email on file: offer to take one. Listens, reads it back, and returns it once confirmed (None if not)."""
+    if choose("I don't have an email address for this package. Would you like to share one?",
+              YES_NO, typed) != "yes":
+        announce.speak("Okay, no email then.")
+        return None
+    question = "Please say your email address."
+    for _ in range(MAX_TRIES):
+        email = understand_email(ask(question, typed))
+        print(f"  [understood email] {email or '-'}")
+        if not email:
+            question = "Sorry, I didn't catch an email address. Please say it again, slowly."
+            continue
+        if choose(f"I heard {spoken_email(email)}. Is that right?", YES_NO, typed) == "yes":
+            return email
+        question = "Okay, please say your email address again."
+    announce.speak("Sorry, I couldn't get the email address, so I won't send a notification.")
+    return None
+
+
 def offer_notification(typed: bool, result: dict, shipping: str, paid_now: bool = False,
                        simulate: bool = False) -> None:
     """Email the package's sender_email (inventory; falls back to VERIARM_NOTIFY_EMAIL in .env) via notify.py.
@@ -97,8 +118,17 @@ def offer_notification(typed: bool, result: dict, shipping: str, paid_now: bool 
         return
     email = result.get("sender_email") or notify_email()
     if not email:
-        announce.speak("I don't have an email address set up yet.")
-        return
+        email = ask_new_email(typed)
+        if not email:
+            return
+        if not simulate and result.get("package_id"):  # remember it for this package
+            from inventory import connect_db, set_email
+            db = connect_db()
+            try:
+                set_email(db, result["package_id"], email)
+                print(f"[checkout] saved {email} for {result['package_id']}")
+            finally:
+                db.close()
     announce.speak(f"Sending it to {spoken_email(email)}.")
     if simulate:
         print(f"[notify] (simulate) not sending to {email}")
@@ -242,8 +272,11 @@ FIXED_LINES = [  # generated in the background at start, so they play without de
     "Express shipping, 1 to 2 days, 12 dollars. Please tap your card on the purple area, then say done.",
     "Payment accepted.", "This package stays here until it's paid.",
     "I can't identify this package. Please generate a shipping label first, then place it in the checkout area.",
-    "Would you like the notification sent to your email?", "Would you like to place another package?",
-    "Great. Place it in the blue zone.", "Waiting for a package in the blue zone.", "Thanks, goodbye!",
+    "Would you like the notification sent to your email?", "Do you have another package to send?",
+    "Great. Please place it in the blue scan area.", "Waiting for a package in the blue zone.",
+    "Thank you, goodbye!", "Please say your email address.", "Okay, no email then.",
+    "If you have another package, just place it in the blue scan area.",
+    "I don't have an email address for this package. Would you like to share one?",
     "Moving the package to the Standard shipping area.", "Moving the package to the Express shipping area.",
     "Sorry, I couldn't send the email.",
 ]
@@ -262,10 +295,14 @@ async def conversation(machine, args) -> None:
         handled += 1
         if args.simulate or args.once or (args.max and handled >= args.max):
             break
-        if choose("Would you like to place another package?", YES_NO, args.type) != "yes":
+        more = choose("Do you have another package to send?", YES_NO, args.type)
+        if more == "no":
             break
-        announce.speak("Great. Place it in the blue zone.")  # wait_for_package() notices it
-    announce.speak("Thanks, goodbye!", wait=True)
+        if more == "yes":
+            announce.speak("Great. Please place it in the blue scan area.")  # wait_for_package() notices it
+        else:  # unclear twice (chatter, silence): don't end the session, just keep watching the zone
+            announce.speak("If you have another package, just place it in the blue scan area.")
+    announce.speak("Thank you, goodbye!", wait=True)
 
 
 async def main():

@@ -9,6 +9,7 @@ Returns one of the choice keys, or "unclear". If Claude can't be reached, a simp
 """
 import json
 import os
+import re
 import sys
 
 MODEL = "claude-opus-5-5"
@@ -68,6 +69,57 @@ def understand(question: str, choices: dict[str, str], answer: str) -> str:
     except Exception as e:  # network, key, parsing: the conversation must keep going
         print(f"  [understand] Claude unavailable ({e}); using keyword matching")
         return _keyword_fallback(choices, answer)
+
+
+EMAIL_RE = re.compile(r"[a-z0-9._%+-]+@[a-z0-9-]+(\.[a-z0-9-]+)*\.[a-z]{2,}")
+EMAIL_SYSTEM = (
+    "You read an email address that someone spoke to VeriArm, a package-sorting robot. The text came from "
+    "speech-to-text, so the address may be spelled out or spoken in words (\"at\", \"dot\", \"underscore\", "
+    "letters one by one, \"double s\"). Return the address they meant, all lowercase, or an empty string "
+    "if they didn't give one."
+)
+
+
+def _email_fallback(answer: str) -> str:
+    """'Sakshi dot M at gmail dot com' -> 'sakshi.m@gmail.com' by word replacement; "" if no address."""
+    t = f" {answer.lower()} "
+    for words, sym in ((r"at the rate|at sign|at", "@"), (r"dot|period|point", "."),
+                       (r"underscore", "_"), (r"dash|hyphen|minus", "-")):
+        t = re.sub(rf"\s(?:{words})\s", f" {sym} ", t)
+    t = re.sub(r"\s+", "", t).strip(".,!?")
+    m = EMAIL_RE.search(t)
+    return m.group(0) if m else ""
+
+
+def understand_email(answer: str) -> str:
+    """The email address in a spoken answer, lowercase, or "" if there isn't a valid one."""
+    if not answer.strip():
+        return ""
+    try:
+        import anthropic
+
+        from robot import _load_env
+        _load_env()
+        if not os.environ.get("ANTHROPIC_API_KEY"):
+            raise RuntimeError("no ANTHROPIC_API_KEY")
+        schema = {"type": "object", "properties": {"email": {"type": "string"}},
+                  "required": ["email"], "additionalProperties": False}
+        response = anthropic.Anthropic().beta.messages.create(
+            model=MODEL,
+            max_tokens=1000,
+            betas=["server-side-fallback-2026-07-01"],
+            fallbacks="default",
+            system=EMAIL_SYSTEM,
+            output_config={"effort": EFFORT, "format": {"type": "json_schema", "schema": schema}},
+            messages=[{"role": "user", "content": f"What they said: {answer!r}"}],
+        )
+        if response.stop_reason in ("refusal", "max_tokens"):
+            raise RuntimeError(f"stop_reason {response.stop_reason}")
+        email = json.loads(next(b.text for b in response.content if b.type == "text"))["email"].strip().lower()
+        return email if EMAIL_RE.fullmatch(email) else ""
+    except Exception as e:  # network, key, parsing: the conversation must keep going
+        print(f"  [understand] Claude unavailable ({e}); reading the email by word replacement")
+        return _email_fallback(answer)
 
 
 if __name__ == "__main__":
