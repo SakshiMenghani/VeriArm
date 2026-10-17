@@ -2,10 +2,11 @@
 
   python ui.py                  http://localhost:8080   (--host 0.0.0.0 to open it from another laptop)
 
-Start runs main.py on THIS laptop (it must have .env and reach the robot), exactly like:
-  continuously   python main.py
-  one box        python main.py --once
-  scan only      python main.py --dry-run
+Start runs the voice checkout (main.py) on THIS laptop: it must have .env, reach the robot, and the
+customer talks to it through this laptop's microphone. Exactly like:
+  checkout       python main.py            package after package ("Do you have another package?")
+  one package    python main.py --once
+  no pick        python main.py --dry-run  talk and scan one package, never pick it up
 Stop ends the run and stops the arm where it is. It does NOT turn the suction off, so a box being
 carried isn't dropped. The physical e-stop is still the real safety.
 
@@ -114,9 +115,19 @@ RUNNER = Runner()
 
 
 def last_result() -> dict | None:
+    """runs/last_result.json (written at scan time), updated with what checkout changed since in the database:
+    payment, shipping, zone, email, placed."""
     if not LAST_RESULT.exists():
         return None
     r = json.loads(LAST_RESULT.read_text())
+    if r.get("result_id"):
+        db = connect_db()
+        try:
+            row = db.execute("SELECT * FROM results WHERE result_id = ?", (r["result_id"],)).fetchone()
+        finally:
+            db.close()
+        if row is not None:
+            r |= {k: row[k] for k in ("payment", "shipping", "zone", "sender_email", "reason", "placed_at")}
     folder = RUNS / Path(r.get("inspection_dir", "")).name
     r["images"] = sorted(f"/runs/{folder.name}/{p.name}" for p in folder.glob("*.jpg")
                          if p.name != "contact.jpg") if folder.is_dir() else []

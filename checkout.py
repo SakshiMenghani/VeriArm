@@ -121,11 +121,14 @@ def offer_notification(typed: bool, result: dict, shipping: str, paid_now: bool 
         email = ask_new_email(typed)
         if not email:
             return
-        if not simulate and result.get("package_id"):  # remember it for this package
-            from inventory import connect_db, set_email
+        result["sender_email"] = email
+        if not simulate and result.get("package_id"):  # remember it for this package (and on this result)
+            from inventory import connect_db, set_email, update_result
             db = connect_db()
             try:
                 set_email(db, result["package_id"], email)
+                if result.get("result_id"):
+                    update_result(result["result_id"], db, sender_email=email)
                 print(f"[checkout] saved {email} for {result['package_id']}")
             finally:
                 db.close()
@@ -252,6 +255,10 @@ async def handle_package(machine, args) -> bool:
                     mark_paid_at_checkout(result["result_id"], shipping, db)
             finally:
                 db.close()
+
+    if not args.simulate and result.get("result_id"):  # the box goes by shipping, not by the scan's zone
+        from inventory import update_result
+        update_result(result["result_id"], zone=SHIPPING[shipping][3])
 
     offer_notification(args.type, result, shipping, paid_now=unpaid, simulate=bool(args.simulate))  # before the move
 

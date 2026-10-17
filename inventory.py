@@ -397,16 +397,29 @@ def next_to_place(db: sqlite3.Connection | None = None) -> dict | None:
             db.close()
 
 
-def mark_paid_at_checkout(result_id: int, shipping: str, db: sqlite3.Connection | None = None) -> None:
-    """The package of this result was paid at checkout: record payment + shipping on the result row."""
+RESULT_UPDATABLE = ("payment", "shipping", "reason", "zone", "sender_email")
+
+
+def update_result(result_id: int, db: sqlite3.Connection | None = None, **fields) -> None:
+    """Change a result row after the scan, e.g. what happened at checkout (zone, payment, email)."""
+    bad = set(fields) - set(RESULT_UPDATABLE)
+    if bad:
+        raise ValueError(f"can't update result columns {sorted(bad)}")
+    if not fields:
+        return
     db, own = _connect_or(db)
     try:
-        db.execute("UPDATE results SET payment = ?, shipping = ?, reason = ? WHERE result_id = ?",
-                   (PAID, payment_fields(True, shipping)[1], "Paid at checkout", result_id))
+        db.execute(f"UPDATE results SET {', '.join(f'{k} = ?' for k in fields)} WHERE result_id = ?",
+                   (*fields.values(), result_id))
         db.commit()
     finally:
         if own:
             db.close()
+
+
+def mark_paid_at_checkout(result_id: int, shipping: str, db: sqlite3.Connection | None = None) -> None:
+    """The package of this result was paid at checkout: record payment + shipping on the result row."""
+    update_result(result_id, db, payment=PAID, shipping=payment_fields(True, shipping)[1], reason="Paid at checkout")
 
 
 def mark_placed(result_id: int, db: sqlite3.Connection | None = None) -> None:

@@ -75,15 +75,16 @@
   <section class="card wide">
     <h2>Run</h2>
     <div class="buttons">
-      <button class="primary" data-mode="loop">Start: continuous</button>
-      <button class="secondary" data-mode="one">Start: one box</button>
-      <button class="secondary" data-mode="scan">Scan only (no pick)</button>
+      <button class="primary" data-mode="loop">Start checkout</button>
+      <button class="secondary" data-mode="one">One package</button>
+      <button class="secondary" data-mode="scan">Talk + scan only (no pick)</button>
       <button class="stop" id="stop" disabled>Stop</button>
     </div>
     <div class="state" id="state"><span class="dot"></span><span id="stateText">Idle</span></div>
     <div class="steps" id="steps"></div>
-    <p class="note">Keep hands off the box and the arm while it runs. Stop halts the arm but leaves the suction on, so
-      a carried box isn't dropped. The physical e-stop is the real safety.</p>
+    <p class="note">VeriArm talks with the customer through this laptop's speaker and microphone: place a package in
+      the blue zone and answer its questions. Keep hands off the box and the arm while it moves. Stop halts the arm
+      but leaves the suction on, so a carried box isn't dropped. The physical e-stop is the real safety.</p>
   </section>
 
   <section class="card">
@@ -99,30 +100,42 @@
   <section class="card wide">
     <h2>History</h2>
     <div class="tablewrap"><table id="history"><thead><tr>
-      <th>#</th><th>Time</th><th>Status</th><th>Zone</th><th>Package</th><th>Recipient</th><th>Reason</th><th>Placed</th>
+      <th>#</th><th>Time</th><th>Payment</th><th>Shipping</th><th>Zone</th><th>Package</th><th>Recipient</th>
+      <th>Email</th><th>Reason</th><th>Placed</th>
     </tr></thead><tbody></tbody></table></div>
   </section>
 </main>
 
 <script>
+// Checkout steps for the current package (main.py's voice checkout). Each test matches a log line.
 const STEPS = [
-  ["find", "Find box", l => l.startsWith("Box '") || l.includes("Package detected")],
-  ["read", "Read label", l => l.includes("LABEL:")],
-  ["verify", "Verify", l => l.startsWith("-> ACCEPTED") || l.startsWith("-> REJECTED")],
-  ["pick", "Pick", l => l.includes("Holding something after lift: True")],
-  ["place", "Place", l => l.includes("[place] box placed")],
-  ["done", "Done", l => l.startsWith("[notify]")],
+  ["find", "Package detected", l => l.includes("Package detected")],
+  ["read", "Read label", l => l.includes("Label read")],
+  ["pay", "Payment", l => l.includes("This package is paid") || l.includes("Payment accepted")],
+  ["email", "Email", l => l.includes("[notify] email sent") || l.includes("Okay, no email then")
+                         || l.includes("Would you like the notification sent")],
+  ["move", "Moving", l => l.includes("[place] carrying")],
+  ["place", "Placed", l => l.includes("[place] box placed")],
+  ["done", "Done", l => l.includes("Do you have another package") || l.includes("Thank you, goodbye")],
 ];
-const FAIL = l => l.includes("pick failed") || l.startsWith("No box:") || l.includes("Traceback") || l.includes("STOP pressed");
+const FAIL = l => l.includes("pick failed") || l.includes("Traceback") || l.includes("STOP pressed")
+  || l.includes("I can't identify this package") || l.includes("stays here until it's paid")
+  || l.includes("couldn't pick up") || l.includes("[notify] email to");
+// A new package restarts the steps: only look at lines since the last "Package detected".
+const currentPackageLines = () => {
+  const i = lines.map(l => l.includes("Package detected")).lastIndexOf(true);
+  return i < 0 ? lines : lines.slice(i);
+};
 const LABELS = {idle: "Idle", running: "Running…", finished: "Finished", failed: "Failed", stopped: "Stopped"};
 let since = 0, lines = [], lastState = null;
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
 
 function renderSteps(state) {
+  const cur = currentPackageLines();
   let reached = -1;
-  STEPS.forEach(([, , test], i) => { if (lines.some(test)) reached = i; });
-  const failed = lines.some(FAIL);
+  STEPS.forEach(([, , test], i) => { if (cur.some(test)) reached = i; });
+  const failed = cur.some(FAIL);
   $("steps").innerHTML = STEPS.map(([, name], i) => {
     let cls = "step";
     if (i <= reached) cls += " done";
@@ -156,12 +169,19 @@ async function loadResult() {
   const imgs = (r.images || []).map(src => `<a href="${esc(src)}" target="_blank"><img src="${esc(src)}" alt=""></a>`).join("");
   const c = r.box_center || {}, d = r.drop_center || {};
   $("result").className = "";
-  $("result").innerHTML = `<div class="result ${esc(r.status)}">
-    <div class="verdict">${esc(r.status)} → ${esc((r.zone || "").toUpperCase())} zone</div>
+  const paid = r.payment === "PAID", ship = (r.shipping || "").toLowerCase();
+  const verdict = paid ? `PAID · ${esc(ship)} shipping → ${esc((r.zone || "").toUpperCase())} zone`
+    : r.reason === "Not paid" ? "UNPAID → stays at checkout" : "NOT IDENTIFIED → stays at checkout";
+  $("result").innerHTML = `<div class="result ${paid ? "ACCEPTED" : "REJECTED"}">
+    <div class="verdict">${verdict}</div>
     <dl>
       <dt>Reason</dt><dd>${esc(r.reason)}</dd>
       <dt>Package</dt><dd>${esc(r.package_id || "—")}</dd>
       <dt>Recipient</dt><dd>${esc(r.recipient || "—")}</dd>
+      <dt>Payment</dt><dd>${esc(r.payment || "—")}</dd>
+      <dt>Shipping</dt><dd>${esc(r.shipping || "—")}</dd>
+      <dt>Email</dt><dd>${esc(r.sender_email || "—")}</dd>
+      <dt>Placed</dt><dd>${r.placed_at ? esc(r.placed_at.replace("T", " ")) : "not moved"}</dd>
       <dt>Label</dt><dd>${esc(r.label_text || "none")}${r.label_face ? " (" + esc(r.label_face) + ")" : ""}</dd>
       <dt>Box at</dt><dd>x ${esc(c.x)}, y ${esc(c.y)}, top z ${esc(c.z)}</dd>
       <dt>Goes to</dt><dd>x ${esc(d.x)}, y ${esc(d.y)}</dd>
@@ -173,11 +193,12 @@ async function loadResult() {
 async function loadHistory() {
   const rows = await (await fetch("/run/history")).json();
   $("history").querySelector("tbody").innerHTML = rows.length ? rows.map(r => `<tr>
-    <td>${r.result_id}</td><td>${esc((r.ts || "").replace("T", " "))}</td><td>${esc(r.status)}</td>
-    <td><span class="pill ${esc(r.zone)}">${esc(r.zone)}</span></td><td>${esc(r.package_id || "—")}</td>
-    <td>${esc(r.recipient || "—")}</td><td>${esc(r.reason)}</td>
-    <td>${r.placed_at ? esc(r.placed_at.slice(11)) : "no"}</td></tr>`).join("")
-    : `<tr><td colspan="8" class="empty">No scans yet.</td></tr>`;
+    <td>${r.result_id}</td><td>${esc((r.ts || "").replace("T", " "))}</td><td>${esc(r.payment || "—")}</td>
+    <td>${esc(r.shipping || "—")}</td>
+    <td>${r.placed_at ? `<span class="pill ${esc(r.zone)}">${esc(r.zone)}</span>` : "—"}</td>
+    <td>${esc(r.package_id || "—")}</td><td>${esc(r.recipient || "—")}</td><td>${esc(r.sender_email || "—")}</td>
+    <td>${esc(r.reason)}</td><td>${r.placed_at ? esc(r.placed_at.slice(11)) : "no"}</td></tr>`).join("")
+    : `<tr><td colspan="10" class="empty">No scans yet.</td></tr>`;
 }
 
 document.querySelectorAll("button[data-mode]").forEach(b => b.onclick = async () => {
