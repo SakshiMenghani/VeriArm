@@ -1,0 +1,65 @@
+# VeriArm developer reference
+
+Detailed notes from the hackathon: every script, the box finder, and the Viam machine resources. For an overview, setup and the demo, see the [README](../README.md).
+
+## Scripts
+
+- `robot.py`: shared `connect()` helper that reads `.env`, plus component name constants (`ARM`, `GRIPPER`, `CAMERA`, `MOTION`)
+- `connect_test.py`: read-only smoke test (lists resources, reads arm pose, saves camera frames to `captures/`)
+- `check_frames.py`: read-only frame system report (what each part is attached to, offsets, obstacles, where the camera and suction tip are now)
+- `record_pose.py <name>`: save where the arm is now as a named pose in `poses.json` (read-only; refuses if the arm is moving). `--list` shows saved poses, `--force` overwrites.
+- `inventory.py`: inventory database (SQLite, seeded from `inventory_seed.csv`) and `verify()`. Loads the seed automatically on first use; `python inventory.py init` reloads it after editing the CSV.
+- `make_labels.py`: printable QR label PDF from the inventory → `labels/labels.pdf`
+- `label_api.py`: HTTP API + web page for live QR generation (package id + recipient), adding packages, label PDFs, verify (http://localhost:8000)
+- `zones.py`: the green/orange drop zones (measured once with the camera, saved in `poses.json` with a reach-checked drop point). `--show` prints them; `--survey` / `--check-drops` re-measure if a sheet moves.
+- `ui.py`: **control panel** at http://localhost:8080: Start (continuous / one box / scan only), Stop, live progress + log, latest result with photos, history. Runs `main.py` on this laptop. Also serves the labels page at `/labels`.
+- `main.py`: the whole cycle: scan → pick → place in green/orange → announce, then return to `overview-blue` and continue scanning. Motion prompts are off by default; `--confirm` enables them. Use `--once` for one scan, `--max N` to stop after placing N boxes, or `--dry-run` to scan once without picking.
+- `scan.py`: `scan(machine)` = find → inspect 5 faces → verify; returns the result for pick/place and writes `runs/last_result.json` (local, not in git). Format examples: `examples/scan_result_*.json`.
+- `inspection.py`: `inspect_box()` reads the QR label from the box's visible faces; `--plan`, `--decode` run without motion.
+- `poses.py`: load saved poses in code, e.g. `get_pose("v_place")["joints"]` or `dict_to_pose(get_pose("v_place")["tip_world"])`
+- `find_pick.py`: `find_box()` (Sandy), `pick_box()` (Yixin). `python find_pick.py find` finds the box (see below); `plan` prints pick targets without the robot; `hover`, `pick`, `release` move the arm and ask before each motion. `pick` opens suction, approaches and lowers the tip to the box top, grabs, reports the holding sensor status, and lifts regardless of that status.
+- `detect.py`: the vision code behind `find_box` (box detection by depth + size, `KNOWN_BOXES`, pixel → table). As a script it's for setup only: `--save-zone` re-records the blue zone (zone empty, arm at `overview-blue`); `--save-photo NAME` keeps a test photo + depth in `reference/`.
+- `announce.py`: VeriArm's voice, through the laptop speaker (the robot has none). `main.py` announces each step: intro, package detected / not, label read, verified / not, moving to the accepted / rejected area. The table at the top of `announce.py` lists every announcement and where it's called from. `python announce.py script` plays them all (no robot); `say "text"` tests the voice; `watch` announces what's in the blue zone (never moves the arm). Mute with `VERIARM_VOICE=0`.
+- `main.py` **runs the voice checkout by default** (the control panel's buttons too: one = `--once`, loop = package after package, scan = `--dry-run`, no pick). `python main.py --classic` = the previous verified / not verified sorting.
+- `checkout.py`: the **voice checkout** at the blue zone (the counter), then one move. Paid status, shipping and email come from the inventory database (`inventory_seed.csv`). Paid packages go straight to their shipping area; unpaid ones choose Standard ($5) or Express ($12) and "tap" a card (say "done"), which marks them PAID; unidentified ones (no label, not in inventory, wrong recipient name) stay with "please generate a shipping label first". The email notification is sent by `notify.py`; with no email on file VeriArm offers to take one by voice, reads it back and saves it. After each package: "Do you have another package to send?". **Standard = green zone, Express = orange zone**. Listens on the laptop mic (`voice_input.py`, ElevenLabs speech-to-text); Claude maps answers to choices and reads spoken email addresses (`understand.py`). `--simulate PKG-001|PKG-003|NONE` runs without the robot; `--type` to type answers; `--confirm` asks before each robot motion.
+- `notify.py`: sends the checkout email over SMTP (`SMTP_USER` / `SMTP_PASSWORD` in `.env`). `python notify.py you@example.com` sends a test email.
+
+## Where is the box? (`find`)
+
+One command, three ways to run it:
+
+```bash
+python find_pick.py find                                    # moves the arm to overview-blue first (asks), then looks
+python find_pick.py find --no-move                          # looks from where the arm is now (must be at overview-blue)
+python find_pick.py find --image reference/box-center.jpg   # offline, from a saved photo (no robot needed)
+```
+
+In code it's the same function: `find_box(machine)` or `find_box(machine, move=False)`.
+
+Example output:
+
+```
+Box 'large': top 287 x 175 mm (measured), height 61 mm (known, camera saw 56), yaw 93 deg
+  box_center (world mm):  x=349.6  y=131.1  z=38.0  (z = top of the box: table -23 + 61 mm box height)
+```
+
+- **`box_center`**: center of the box's footprint, in mm, in the world frame (same as the arm's base frame). This is exactly what `find_box()` returns. **`z` is the top of the box** (where the suction cup goes): the table top (−23) plus the known height of the detected box. **`theta` is the box's yaw** (same as the printed yaw), not a wrist angle.
+- **Size and yaw**: length/width are measured from the camera, so they include the box's end flaps (a bit bigger than 272 x 170). **Height is the known height** of the matched box (`KNOWN_BOXES`), not the camera's reading, which varies by ~5 mm; the camera's value is shown for reference (`measured_height_mm` in code). `yaw` is the direction of the long side, 0-180 deg.
+- To send the suction tip somewhere, remember the tip is **17 mm lower** than the robot thinks (see PLAN.md).
+
+Each run also saves and opens a picture, `captures/detection.jpg`: **pink** = the blue zone, **yellow** = the detected box, **red cross** = the center it returns. Use it to check the detection by eye.
+
+**Boxes not in `KNOWN_BOXES`:** known boxes are always matched first. If nothing matches, a box-shaped, fully visible object (5–33 cm sides, 3–25 cm tall) is accepted as `unknown`, using the camera's **measured** size and height; the voice says "an unknown box, using measured size". The measured height can be ~5 mm off, and up to ~15 mm too high for tall boxes (the suction may stop short), so add boxes you use often to `KNOWN_BOXES` with ruler numbers. Strict mode, known boxes only: `VERIARM_UNKNOWN_BOXES=0`.
+
+If it can't give an answer, it says why and does nothing:
+
+| Message | Meaning | Fix |
+|---|---|---|
+| `NotAtViewError: Arm is N deg away from overview-blue` | the camera isn't where the coordinates assume | run without `--no-move` so it moves there first |
+| `NoBoxError: no known box in the blue zone (saw objects: ...)` | nothing box-sized and box-tall in the zone | put the box fully (or nearly) inside the blue zone; "saw objects" lists what it rejected |
+| `ZoneBlockedError: ...` | the camera can't see enough of the blue zone | clear hands, laptops, etc. off the zone |
+
+## Machine resources
+
+- `arm`, `vacuum_gripper-1`, `cam` (wrist camera, color + depth), `audio_in-1` (microphone), `builtin` motion service, `discovery-1`
+- `table`, `wall-front`, `wall-side`, `ceiling`: obstacle geometry for the motion planner, not real grippers

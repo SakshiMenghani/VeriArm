@@ -1,15 +1,92 @@
 # VeriArm
 
-**InspectAI — Voice-Powered Robotic Quality Inspection**
+**A voice checkout counter run by a robot arm.** Put a package down and VeriArm finds it, reads its QR label, checks it
+against the inventory, talks you through payment and shipping, emails you a notification, and then places the
+package in the right shipping area.
 
-Viam Robot Hackathon "Code That Moves" (Oct 16–17, 2026).
+Built in two days at the Viam Robot Hackathon *"Code That Moves"* (Oct 16–17, 2026) on a uFactory arm with a vacuum
+gripper and a wrist-mounted color + depth camera.
 
-The robot reads a package label with the arm camera, checks it against the expected inventory,
-says the result out loud, and moves the box from the blue zone (DETECTED) to green (ACCEPTED) or orange (REJECTED).
+![VeriArm control panel after a checkout: the latest result shows PKG-003 paid at checkout with Express shipping, placed in the orange zone; below are the package inventory and the scan history](docs/images/control-panel.png)
 
-## Setup
+---
 
-Needs **Python 3.10+** (we use 3.12). With [uv](https://docs.astral.sh/uv/):
+## What a checkout looks like
+
+The table has three zones: **blue** is the counter where a package is placed, **green** is the Standard shipping
+area and **orange** is the Express shipping area. This is a real conversation from the demo with an unpaid package:
+
+> **VeriArm:** Waiting for a package in the blue zone.<br>
+> *(a box is placed)*<br>
+> **VeriArm:** Package detected: the tall box. Checking the label.<br>
+> **VeriArm:** Label read: package P K G 0 0 3, for Yixin.<br>
+> **VeriArm:** This package hasn't been paid yet. Which shipping would you like? Standard for 5 dollars, or Express for 12 dollars.<br>
+> **Customer:** It's for $12.<br>
+> **VeriArm:** Express shipping, 1 to 2 days, 12 dollars. Please tap your card on the purple area, then say done.<br>
+> **Customer:** Done.<br>
+> **VeriArm:** Payment accepted. Would you like the notification sent to your email?<br>
+> **Customer:** Yes.<br>
+> **VeriArm:** I don't have an email address for this package. Would you like to share one?<br>
+> **Customer:** Yes. *(says the address)*<br>
+> **VeriArm:** I heard … Is that right? → Sending it to … *(a real email goes out)*<br>
+> **VeriArm:** Moving the package to the Express shipping area. *(picks the box and places it in orange)*<br>
+> **VeriArm:** Do you have another package to send?<br>
+> **Customer:** No.<br>
+> **VeriArm:** Thank you, goodbye!
+
+What VeriArm does depends on the package:
+
+| Package | What happens |
+|---|---|
+| **Paid** (in the inventory with Standard or Express shipping) | "This package is paid, with Standard shipping." → email offer → placed in that shipping area |
+| **Unpaid** (in the inventory, not paid yet) | Asks for Standard or Express, takes a simulated card tap, records the package as paid → email offer → placed |
+| **Not identified** (no label, unknown package, or the name on the label doesn't match) | "I can't identify this package. Please generate a shipping label first." The package stays at the counter. |
+
+## Demo images
+
+All photos are taken by the camera on the arm's wrist during real runs.
+
+| | |
+|---|---|
+| ![Overhead view of the blue zone: a pink outline marks the zone, a yellow rectangle marks the detected box and a red cross marks its center](docs/images/1-find-box.jpg) | ![Top-down close-up of a box with a QR label reading PKG-001, To: Sakshi Menghani](docs/images/2-label-top.jpg) |
+| **1. Find the box.** From a fixed pose above the counter, the depth camera finds a box-shaped object in the blue zone (pink), matches it to a known box size (yellow) and returns its center and rotation (red cross). | **2. Read the label (top).** The arm moves the camera straight over the box and decodes the QR code: `VA1\|PKG-001\|Sakshi Menghani`. |
+| ![Angled view of the side of a box with a QR label reading PKG-003, To: Yixin, with the orange shipping zone visible on the right](docs/images/3-label-side.jpg) | ![Two stacked views of the same scene: the color photo of a box on the blue zone, and below it a depth map where the box stands out in blue against the red table](docs/images/4-depth.jpg) |
+| **3. Read the label (side).** If the label isn't on top, the camera visits each side of the box at an angle until it finds one. | **4. Depth.** The box is found by height above the table in the depth image, so table colors, shadows and printing on the box don't confuse it. |
+| ![Two wrist-camera photos side by side, at the box top and after the lift, annotated "size 0.98 -> HELD"](docs/images/5-grip-check.jpg) | |
+| **5. Grip check.** The wrist camera compares the box top before and after lifting. If the printing on the box stays the same size (score 0.98), the box came up with the suction cup. The check is logged for debugging. | |
+
+## How it works
+
+```mermaid
+flowchart LR
+    A[Wait for a package<br>in the blue zone] --> B[Find the box<br>depth camera]
+    B --> C[Read the QR label<br>top, then sides]
+    C --> D{Check the inventory}
+    D -- not identified --> X[Ask for a shipping label<br>package stays]
+    D -- unpaid --> P[Standard or Express?<br>card tap]
+    D -- paid --> E
+    P --> E[Offer an email<br>take a new one by voice]
+    E --> F[Pick with suction<br>place by shipping]
+    F --> G{Another package?}
+    G -- yes --> A
+    G -- no --> H[Goodbye]
+    X --> G
+```
+
+| Part | How |
+|---|---|
+| **Robot** | [Viam](https://www.viam.com/) Python SDK: arm, vacuum gripper, wrist RGB-D camera and the built-in motion planner, with the table, walls and ceiling as obstacles. |
+| **Vision** | OpenCV on the camera's color + depth frames: the blue zone is found by color, the box by height above the table, the label with OpenCV's QR detector. |
+| **Voice** | ElevenLabs text-to-speech for VeriArm's voice and speech-to-text for the customer's answers, through the laptop's speaker and microphone. |
+| **Understanding** | Claude maps free-form answers ("the fast one", "it's for $12") to a choice, and reads spoken email addresses ("sakshi dot m at gmail dot com"). With no network it falls back to keyword matching. |
+| **Inventory** | SQLite, seeded from [`inventory_seed.csv`](inventory_seed.csv): package id, recipient, payment (PAID / UNPAID), shipping (STANDARD / EXPRESS) and email. Every scan and result is logged. |
+| **Notifications** | A plain email over SMTP with the package, recipient, payment and shipping. |
+| **Control panel** | A small web app (`ui.py`) to start and stop runs, follow each step live, see the latest result with its photos, browse the inventory and history, and reset the demo. |
+
+## Getting started
+
+You need Python 3.10+ (we used 3.12), a Viam machine with an arm, a vacuum gripper and a color + depth camera, and API
+keys for Anthropic and ElevenLabs.
 
 ```bash
 uv venv --python 3.12 .venv
@@ -17,73 +94,78 @@ source .venv/bin/activate
 uv pip install -r requirements.txt
 ```
 
-(Or `python3.12 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt`.)
+Create a `.env` file (it's git-ignored):
 
-Create `.env` (git-ignored) with the machine credentials from the Viam app's CONNECT tab:
-
-```
+```bash
+# Viam machine: from the Viam app's CONNECT tab
 VIAM_ADDRESS=<machine>.viam.cloud
 VIAM_API_KEY=...
 VIAM_API_KEY_ID=...
+
+# Voice and understanding
+ELEVENLABS_API_KEY=...
+ANTHROPIC_API_KEY=...
+
+# Email notifications (for Gmail, use an App Password)
+SMTP_USER=sender@example.com
+SMTP_PASSWORD=...
 ```
 
-## Scripts
+Optional: `SMTP_HOST` / `SMTP_PORT` (default `smtp.gmail.com:587`), `SMTP_FROM`, `ELEVENLABS_VOICE_ID`, and
+`VERIARM_NOTIFY_EMAIL` as a fallback address.
 
-- `robot.py`: shared `connect()` helper that reads `.env`, plus component name constants (`ARM`, `GRIPPER`, `CAMERA`, `MOTION`)
-- `connect_test.py`: read-only smoke test (lists resources, reads arm pose, saves camera frames to `captures/`)
-- `check_frames.py`: read-only frame system report (what each part is attached to, offsets, obstacles, where the camera and suction tip are now)
-- `record_pose.py <name>`: save where the arm is now as a named pose in `poses.json` (read-only; refuses if the arm is moving). `--list` shows saved poses, `--force` overwrites.
-- `inventory.py`: inventory database (SQLite, seeded from `inventory_seed.csv`) and `verify()`. Loads the seed automatically on first use; `python inventory.py init` reloads it after editing the CSV.
-- `make_labels.py`: printable QR label PDF from the inventory → `labels/labels.pdf`
-- `label_api.py`: HTTP API + web page for live QR generation (package id + recipient), adding packages, label PDFs, verify (http://localhost:8000)
-- `zones.py`: the green/orange drop zones (measured once with the camera, saved in `poses.json` with a reach-checked drop point). `--show` prints them; `--survey` / `--check-drops` re-measure if a sheet moves.
-- `ui.py`: **control panel** at http://localhost:8080: Start (continuous / one box / scan only), Stop, live progress + log, latest result with photos, history. Runs `main.py` on this laptop. Also serves the labels page at `/labels`.
-- `main.py`: the whole cycle: scan → pick → place in green/orange → announce, then return to `overview-blue` and continue scanning. Motion prompts are off by default; `--confirm` enables them. Use `--once` for one scan, `--max N` to stop after placing N boxes, or `--dry-run` to scan once without picking.
-- `scan.py`: `scan(machine)` = find → inspect 5 faces → verify; returns the result for pick/place and writes `runs/last_result.json` (local, not in git). Format examples: `examples/scan_result_*.json`.
-- `inspection.py`: `inspect_box()` reads the QR label from the box's visible faces; `--plan`, `--decode` run without motion.
-- `poses.py`: load saved poses in code, e.g. `get_pose("v_place")["joints"]` or `dict_to_pose(get_pose("v_place")["tip_world"])`
-- `find_pick.py`: `find_box()` (Sandy), `pick_box()` (Yixin). `python find_pick.py find` finds the box (see below); `plan` prints pick targets without the robot; `hover`, `pick`, `release` move the arm and ask before each motion. `pick` opens suction, approaches and lowers the tip to the box top, grabs, reports the holding sensor status, and lifts regardless of that status.
-- `detect.py`: the vision code behind `find_box` (box detection by depth + size, `KNOWN_BOXES`, pixel → table). As a script it's for setup only: `--save-zone` re-records the blue zone (zone empty, arm at `overview-blue`); `--save-photo NAME` keeps a test photo + depth in `reference/`.
-- `announce.py`: VeriArm's voice, through the laptop speaker (the robot has none). `main.py` announces each step: intro, package detected / not, label read, verified / not, moving to the accepted / rejected area. The table at the top of `announce.py` lists every announcement and where it's called from. `python announce.py script` plays them all (no robot); `say "text"` tests the voice; `watch` announces what's in the blue zone (never moves the arm). Mute with `VERIARM_VOICE=0`.
-- `main.py` **runs the voice checkout by default** (the control panel's buttons too: one = `--once`, loop = package after package, scan = `--dry-run`, no pick). `python main.py --classic` = the previous verified / not verified sorting.
-- `checkout.py`: a **voice checkout** at the blue zone (the counter), then one move. Paid packages (PKG-001: Standard) go straight to their shipping area; unpaid ones (PKG-003, and other known packages) choose Standard ($5) or Express ($12) and "tap" a card (say "done"); unidentified ones (no label, not in inventory, recalled) stay with "please generate a shipping label first". Email question before the move; **Standard = green zone, Express = orange zone**. Listens on the laptop mic (`voice_input.py`, ElevenLabs speech-to-text); Claude maps answers to choices (`understand.py`). `--simulate PKG-001|PKG-003|PKG-006|NONE` runs without the robot; `--type` to type answers; `--confirm` asks before each robot motion (off by default, like main.py). Needs `ANTHROPIC_API_KEY`, `ELEVENLABS_API_KEY`, `VERIARM_NOTIFY_EMAIL` in `.env`. VeriArm speaks with an ElevenLabs voice (cached per sentence in `captures/voice_cache/`; Mac voice as fallback, or `VERIARM_TTS=say`); pick another voice with `ELEVENLABS_VOICE_ID`.
-
-## Where is the box? (`find`)
-
-One command, three ways to run it:
+## Running it
 
 ```bash
-python find_pick.py find                                    # moves the arm to overview-blue first (asks), then looks
-python find_pick.py find --no-move                          # looks from where the arm is now (must be at overview-blue)
-python find_pick.py find --image reference/box-center.jpg   # offline, from a saved photo (no robot needed)
+python ui.py                                    # control panel at http://localhost:8080
+python main.py                                  # voice checkout, package after package
+python main.py --once                           # one package
+python checkout.py --simulate PKG-003 --type    # the conversation without the robot, typing your answers
 ```
 
-In code it's the same function: `find_box(machine)` or `find_box(machine, move=False)`.
+Before a demo, press **Reset demo** in the control panel (or run `python inventory.py reset`). It puts payment,
+shipping and status back to `inventory_seed.csv` so unpaid packages go through payment again. Emails and history are
+kept.
 
-Example output:
+Other useful commands:
 
+```bash
+python inventory.py list                        # packages with payment, shipping and email
+python inventory.py pay PKG-002 express         # mark a package paid
+python inventory.py email PKG-002 you@example.com
+python notify.py you@example.com                # send a test email
+python make_labels.py                           # printable QR labels → labels/labels.pdf
 ```
-Box 'large': top 287 x 175 mm (measured), height 61 mm (known, camera saw 56), yaw 93 deg
-  box_center (world mm):  x=349.6  y=131.1  z=38.0  (z = top of the box: table -23 + 61 mm box height)
-```
 
-- **`box_center`**: center of the box's footprint, in mm, in the world frame (same as the arm's base frame). This is exactly what `find_box()` returns. **`z` is the top of the box** (where the suction cup goes): the table top (−23) plus the known height of the detected box. **`theta` is the box's yaw** (same as the printed yaw), not a wrist angle.
-- **Size and yaw**: length/width are measured from the camera, so they include the box's end flaps (a bit bigger than 272 x 170). **Height is the known height** of the matched box (`KNOWN_BOXES`), not the camera's reading, which varies by ~5 mm; the camera's value is shown for reference (`measured_height_mm` in code). `yaw` is the direction of the long side, 0-180 deg.
-- To send the suction tip somewhere, remember the tip is **17 mm lower** than the robot thinks (see PLAN.md).
+**Safety:** keep someone at the arm's e-stop whenever it runs. The Stop button in the control panel halts the arm but
+leaves the suction on, so a carried box isn't dropped.
 
-Each run also saves and opens a picture, `captures/detection.jpg`: **pink** = the blue zone, **yellow** = the detected box, **red cross** = the center it returns. Use it to check the detection by eye.
+## Project layout
 
-**Boxes not in `KNOWN_BOXES`:** known boxes are always matched first. If nothing matches, a box-shaped, fully visible object (5–33 cm sides, 3–25 cm tall) is accepted as `unknown`, using the camera's **measured** size and height; the voice says "an unknown box, using measured size". The measured height can be ~5 mm off, and up to ~15 mm too high for tall boxes (the suction may stop short), so add boxes you use often to `KNOWN_BOXES` with ruler numbers. Strict mode, known boxes only: `VERIARM_UNKNOWN_BOXES=0`.
+| File | What it does |
+|---|---|
+| `main.py` | Entry point: connects to the robot and runs the voice checkout |
+| `checkout.py` | The conversation: wait for a package, payment, shipping, email, move, another package |
+| `scan.py` | Find the box, read its label, check the inventory |
+| `detect.py`, `find_pick.py` | Box detection from depth; pick with suction |
+| `inspection.py` | Visit the box's faces with the camera and decode the QR label |
+| `place.py`, `zones.py` | Carry the box to the green or orange zone and set it down |
+| `inventory.py` | SQLite inventory, `verify()`, payment, shipping, emails and results |
+| `announce.py`, `voice_input.py`, `understand.py` | Speaking, listening and understanding answers |
+| `notify.py` | Email notifications |
+| `ui.py`, `ui.html` | Control panel |
+| `label_api.py`, `make_labels.py` | QR label generation and the labels page |
 
-If it can't give an answer, it says why and does nothing:
+The full script reference, the box finder's details and the Viam machine resources are in
+[docs/REFERENCE.md](docs/REFERENCE.md).
 
-| Message | Meaning | Fix |
-|---|---|---|
-| `NotAtViewError: Arm is N deg away from overview-blue` | the camera isn't where the coordinates assume | run without `--no-move` so it moves there first |
-| `NoBoxError: no known box in the blue zone (saw objects: ...)` | nothing box-sized and box-tall in the zone | put the box fully (or nearly) inside the blue zone; "saw objects" lists what it rejected |
-| `ZoneBlockedError: ...` | the camera can't see enough of the blue zone | clear hands, laptops, etc. off the zone |
+## Team
 
-## Machine resources
+Built at the Viam hackathon by:
 
-- `arm`, `vacuum_gripper-1`, `cam` (wrist camera, color + depth), `audio_in-1` (microphone), `builtin` motion service, `discovery-1`
-- `table`, `wall-front`, `wall-side`, `ceiling`: obstacle geometry for the motion planner, not real grippers
+- **Sandy Zhao** ([@SandyZhao18](https://github.com/SandyZhao18)): finding the box, the voice checkout conversation
+- **Yixin** ([@carolineli7199](https://github.com/carolineli7199)): picking, sorting and placing the box
+- **Sakshi Menghani** ([@SakshiMenghani](https://github.com/SakshiMenghani)): label inspection and verification, the
+  inventory with payments, shipping and email notifications, the control panel and the main loop
+
+This is a copy of the team repository, [carolineli7199/VeriArm](https://github.com/carolineli7199/VeriArm).
