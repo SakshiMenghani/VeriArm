@@ -9,7 +9,7 @@ Endpoints:
   GET  /label/PKG-001                     printable label PNG (QR + id + recipient text)
   GET  /labels.pdf                        all inventory labels;  ?ids=PKG-001,PKG-002  &size=40  &test_cases=1
   GET  /items                             inventory as JSON (with each item's status)
-  POST /items      {"id","recipient","expected"?}   add/replace a package -> its label text + links
+  POST /items      {"id","recipient","paid"?,"shipping"?,"sender_email"?,"wrong_recipient_email"?}   add/replace a package -> label + links
   POST /verify     {"text": "VA1|PKG-001|Sakshi Menghani"}   run verify() -> status JSON (logged like a real scan)
   GET  /scans                             last 50 scan log entries as JSON
   GET  /next                              next scanned box to place: zone (green/orange) + box_center, or null
@@ -54,13 +54,15 @@ input{padding:4px}button{padding:5px 10px}</style></head><body>
 <a href="/labels.pdf?test_cases=1">with reject test labels</a> · print at 100%</p>
 <form id=f><b>Add package:</b> <input name=id placeholder="PKG-007" required>
 <input name=recipient placeholder="Recipient name (max {MAX} chars)" maxlength={MAX} required>
-<label><input type=checkbox name=unexpected> not expected</label> <button>Add</button></form>
+<select name=payment><option value=STANDARD>Paid, standard</option><option value=EXPRESS>Paid, express</option>
+<option value=UNPAID>Unpaid</option></select>
+<input name=sender_email type=email placeholder="Sender email"> <button>Add</button></form>
 <p id=msg></p>
-<table><tr><th>QR</th><th>Package ID</th><th>Recipient</th><th>Expected</th><th>Status</th><th>Label</th></tr>{ROWS}</table>
+<table><tr><th>QR</th><th>Package ID</th><th>Recipient</th><th>Payment</th><th>Shipping</th><th>Status</th><th>Label</th></tr>{ROWS}</table>
 <script>
-f.onsubmit=async e=>{e.preventDefault();const d=new FormData(f);
+f.onsubmit=async e=>{e.preventDefault();const d=new FormData(f);const p=d.get('payment');
 const r=await fetch('/items',{method:'POST',headers:{'Content-Type':'application/json'},
-body:JSON.stringify({id:d.get('id'),recipient:d.get('recipient'),expected:!d.get('unexpected')})});
+body:JSON.stringify({id:d.get('id'),recipient:d.get('recipient'),paid:p!=='UNPAID',shipping:p==='UNPAID'?null:p,sender_email:d.get('sender_email')||null})});
 const j=await r.json(); if(r.ok) location.reload(); else msg.textContent=j.error;};
 </script></body></html>"""
 
@@ -105,7 +107,7 @@ class Handler(BaseHTTPRequestHandler):
             if not parts:
                 rows = "".join(
                     f"<tr><td><img src='/qr/{quote(r['id'])}'></td><td>{r['id']}</td><td>{html.escape(r['recipient'])}</td>"
-                    f"<td>{'yes' if r['expected'] else 'no'}</td><td>{r['status'] or '-'}</td>"
+                    f"<td>{r['payment']}</td><td>{r['shipping'] or '-'}</td><td>{r['status'] or '-'}</td>"
                     f"<td><a href='/label/{quote(r['id'])}'>PNG</a> · "
                     f"<a href='/labels.pdf?ids={quote(r['id'])}'>PDF</a></td></tr>" for r in all_items(db))
                 return self._send(200, INDEX.replace("{MAX}", str(MAX_NAME_LEN)).replace("{ROWS}", rows).encode(), "text/html")
@@ -167,9 +169,13 @@ class Handler(BaseHTTPRequestHandler):
                 pid, recipient = str(body.get("id", "")).strip(), str(body.get("recipient", "")).strip()
                 if not pid or not recipient:
                     return self._error("need id and recipient")
-                expected = bool(body.get("expected", True))
-                text = add_item(db, pid, recipient, expected)  # validates format + length
-                return self._json({"id": pid, "recipient": recipient, "expected": expected, "label": text,
+                paid = bool(body.get("paid", True))
+                text = add_item(db, pid, recipient, paid, body.get("shipping"),  # validates format, length, shipping
+                                body.get("sender_email"), body.get("wrong_recipient_email"))
+                item = get_item(db, pid)
+                return self._json({"id": pid, "recipient": recipient, "payment": item["payment"],
+                                   "shipping": item["shipping"], "sender_email": item["sender_email"],
+                                   "wrong_recipient_email": item["wrong_recipient_email"], "label": text,
                                    "qr": f"/qr/{quote(pid)}", "label_png": f"/label/{quote(pid)}",
                                    "pdf": f"/labels.pdf?ids={quote(pid)}"}, 201)
 
@@ -183,7 +189,8 @@ class Handler(BaseHTTPRequestHandler):
             if parts == ["verify"]:
                 r = verify(body.get("text"), db, face=body.get("face"))
                 return self._json({"status": r.status.value, "zone": r.zone, "accepted": r.accepted,
-                                   "reason": r.reason, "id": r.package_id, "recipient": r.recipient, "say": r.say()})
+                                   "reason": r.reason, "id": r.package_id, "recipient": r.recipient,
+                                   "shipping": r.shipping, "say": r.say()})
 
             return self._error("not found", 404)
         except (ValueError, sqlite3.Error) as e:

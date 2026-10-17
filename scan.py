@@ -16,11 +16,15 @@ Result fields (JSON in runs/last_result.json; same dict in Python, plus "box_cen
     status        "ACCEPTED" | "REJECTED"
     zone          "green" | "orange"           where place_box should put it
     accepted      true | false                 the bool for place_box(machine, verified)
-    reason        why, e.g. "Matches inventory", "Not in inventory", "Recipient does not match",
-                  "Not expected", "Label is not a VeriArm code", "No label found",
+    reason        why, e.g. "Paid", "Not in inventory", "Recipient does not match",
+                  "Not paid", "Label is not a VeriArm code", "No label found",
                   "Label seen on the +x side but could not be read"
     package_id    "PKG-001" | null             from the QR (null if no readable label)
     recipient     "Sakshi Menghani" | null     from the inventory when accepted, else from the QR
+    payment       "PAID" | "UNPAID"            PAID when accepted
+    shipping      "EXPRESS" | "STANDARD" | null  for accepted (paid) packages
+    sender_email  "someone@example.com" | null  who to notify: the package's sender_email, or its
+                                               wrong_recipient_email if the label's name doesn't match
     label_text    raw QR text, e.g. "VA1|PKG-001|Sakshi Menghani" | null
     label_face    "top" | "-x side" | ... | null   which face the label was read on
     box_center    {x, y, z, theta}             world mm; z = TOP of the box; theta = box yaw (deg); same as find_box()
@@ -44,7 +48,7 @@ import announce
 import find_pick
 from inspection import LAST_INSPECTION, RUNS, inspect_box
 from detect import NoBoxError, TABLE_TOP_Z
-from inventory import payment_for, record_detected, save_result, sender_email_for, verify
+from inventory import payment_for, record_detected, save_result, verify
 from zones import drop_center
 from robot import connect
 
@@ -82,7 +86,8 @@ async def scan(machine: RobotClient) -> dict | None:
         "package_id": r.package_id,
         "recipient": r.recipient,
         "payment": payment_for(r.accepted),          # PAID / UNPAID
-        "sender_email": sender_email_for(r.recipient),  # who to notify (contacts_seed.csv), None if unknown
+        "shipping": r.shipping,                      # EXPRESS / STANDARD when paid, else None
+        "sender_email": r.sender_email,              # who to notify (inventory_seed.csv), None if unknown
         "label_text": text,
         "label_face": report.get("found_on"),
         "box_center": {"x": round(box_center.x, 1), "y": round(box_center.y, 1), "z": round(box_center.z, 1),

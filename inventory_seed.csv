@@ -1,7 +1,7 @@
-id,recipient,expected
-PKG-001,Sakshi Menghani,1
-PKG-002,Sandy,1
-PKG-003,Yixin,1
-PKG-004,Caroline,1
-PKG-005,Alex Johnson,1
-PKG-006,Jordan Lee,0
+id,recipient,payment,shipping,sender_email,wrong_recipient_email
+PKG-001,Sakshi Menghani,PAID,STANDARD,sakshi.menghani03@gmail.com,zf80213@umbc.edu
+PKG-002,Sandy,PAID,STANDARD,,
+PKG-003,Yixin,UNPAID,,,
+PKG-004,Caroline,PAID,STANDARD,,
+PKG-005,Alex Johnson,PAID,STANDARD,,
+PKG-006,Jordan Lee,UNPAID,,,
