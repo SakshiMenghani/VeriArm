@@ -214,10 +214,12 @@ async def handle_package(machine, args) -> bool:
         if shipping is None:
             return True  # not paid: the box stays at the counter
         if not args.simulate:  # record the payment, so the next scan sees it as paid
-            from inventory import connect_db, set_payment
+            from inventory import connect_db, mark_paid_at_checkout, set_payment
             db = connect_db()
             try:
                 set_payment(db, result["package_id"], True, shipping)
+                if result.get("result_id"):
+                    mark_paid_at_checkout(result["result_id"], shipping, db)
             finally:
                 db.close()
 
