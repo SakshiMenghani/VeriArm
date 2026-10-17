@@ -28,7 +28,7 @@ CALIBRATE_S = 0.4            # measure the room noise first
 START_TIMEOUT_S = 7.0        # give up if nobody starts talking within this
 END_SILENCE_S = 1.0          # stop after this much quiet once someone has spoken
 MAX_RECORD_S = 10.0
-SPEECH_FACTOR = 3.0          # speech = louder than room noise x this
+SPEECH_FACTOR = 2.5          # speech = louder than room noise x this (3.0 missed a slightly quiet answer)
 MIN_SPEECH_RMS = 0.01
 MIN_SPEECH_S = 0.15          # this much continuous sound before it counts as speech (ignores clicks/bumps)
 LAST_ANSWER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "captures", "last_answer.wav")

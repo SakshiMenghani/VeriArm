@@ -56,14 +56,13 @@ def intro() -> None:
 
 def package_detected(box_name: str, recheck: bool = False) -> None:
     """2. find_pick.find_box(): a box was found in the blue zone. recheck=True (the look right before
-    picking) stays quiet if the same sentence was just said; a first look always speaks."""
+    picking) says nothing: it's an internal check, and the package was already announced."""
+    if recheck:
+        return
     text = ("Package detected: an unknown box, using measured size." if box_name == "unknown"
             else f"Package detected: the {box_name} box.")
-    if recheck:
-        speak_once(text, key="zone")
-    else:
-        _last_said["zone"] = (text, time.monotonic())
-        speak(text)
+    _last_said["zone"] = (text, time.monotonic())
+    speak(text)
 
 
 def no_package(error: Exception | None = None) -> None:
