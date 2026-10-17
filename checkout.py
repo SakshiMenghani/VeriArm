@@ -15,8 +15,8 @@ Paid status and shipping are hardcoded in ORDERS for the demo (to move into the 
 Stage 1: the email is only announced (sending: stage 2); the card tap is confirmed by saying "done"
 (camera check: stage 3).
 
-  python checkout.py                       full conversation with the robot (asks before each motion)
-  python checkout.py --yes                 ... without the motion prompts
+  python checkout.py                       full conversation with the robot (no motion prompts)
+  python checkout.py --confirm             ... asking before each robot motion
   python checkout.py --no-pick             talk + scan, but never pick up the box
   python checkout.py --simulate PKG-003    no robot: test the conversation for this package
                                            (PKG-001 paid, PKG-003 unpaid, PKG-006 recalled, NONE no label)
@@ -143,8 +143,13 @@ async def handle_package(machine, args) -> bool:
     if args.simulate:
         result = simulated_result(args.simulate)
     else:
+        from detect import NotAtViewError, ZoneBlockedError
         from scan import scan
-        result = await scan(machine)  # announces: detected, label read
+        try:
+            result = await scan(machine)  # announces: detected, label read
+        except (ZoneBlockedError, NotAtViewError) as e:  # find_box already said "I can't see the blue zone"
+            print(f"[checkout] can't look at the zone: {e}")
+            return False
         if result is None:
             return False
 
@@ -209,7 +214,7 @@ async def conversation(machine, args) -> None:
 
 async def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--yes", action="store_true", help="don't ask before each motion")
+    p.add_argument("--confirm", action="store_true", help="ask before each robot motion")
     p.add_argument("--no-pick", action="store_true", help="scan and talk, but never pick the box up")
     p.add_argument("--simulate", metavar="PACKAGE", help="no robot: PKG-001, PKG-003, PKG-006, NONE ...")
     p.add_argument("--type", action="store_true", help="type answers instead of speaking them")
@@ -221,7 +226,7 @@ async def main():
         return
     import find_pick
     from robot import connect
-    find_pick.ASK_BEFORE_MOVING = not args.yes
+    find_pick.ASK_BEFORE_MOVING = args.confirm
     async with await connect() as machine:
         await conversation(machine, args)
 

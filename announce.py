@@ -53,12 +53,16 @@ def intro() -> None:
     speak("Hello, this is VeriArm. I'll be here to help you sort packages whenever you are ready.")
 
 
-def package_detected(box_name: str) -> None:
-    """2. find_pick.find_box(): a known box was found in the blue zone."""
-    if box_name == "unknown":
-        speak_once("Package detected: an unknown box, using measured size.", key="zone")
+def package_detected(box_name: str, recheck: bool = False) -> None:
+    """2. find_pick.find_box(): a box was found in the blue zone. recheck=True (the look right before
+    picking) stays quiet if the same sentence was just said; a first look always speaks."""
+    text = ("Package detected: an unknown box, using measured size." if box_name == "unknown"
+            else f"Package detected: the {box_name} box.")
+    if recheck:
+        speak_once(text, key="zone")
     else:
-        speak_once(f"Package detected: the {box_name} box.", key="zone")
+        _last_said["zone"] = (text, time.monotonic())
+        speak(text)
 
 
 def no_package(error: Exception | None = None) -> None:

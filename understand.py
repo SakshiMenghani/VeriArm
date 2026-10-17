@@ -17,12 +17,16 @@ EFFORT = "low"  # short answers, live conversation: speed matters more than dept
 SYSTEM = (
     "You interpret a spoken answer in a short voice conversation with VeriArm, a package-sorting robot. "
     "The answer came from speech-to-text, so expect transcription slips. Pick the one choice the person "
-    "meant, or \"unclear\" if they didn't clearly pick one (silence, off-topic, asking something else)."
+    "meant, or \"unclear\" if they didn't clearly pick one (silence, off-topic, asking something else). "
+    "For yes/no questions, a bare \"thank you\" or \"thanks\" with nothing else is unclear: it can mean "
+    "either \"yes please\" or \"no thanks\"."
 )
 
 
 def _keyword_fallback(choices: dict[str, str], answer: str) -> str:
     a = f" {answer.lower()} "
+    if answer.lower().strip(" .!") in ("thank you", "thanks", "thank you very much"):
+        return "unclear"
     synonyms = {"yes": ["yes", "yeah", "yep", "sure", "ok", "okay", "please", "go ahead"],
                 "no": ["no", "nope", "not", "don't", "no thanks"]}
     hits = [k for k in choices if any(f" {w} " in a or w in a.split() for w in synonyms.get(k, [k]))]

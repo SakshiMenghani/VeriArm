@@ -122,7 +122,7 @@ async def find_box(machine: RobotClient, move: bool = True) -> Pose:
     except LookupError as e:  # NoBoxError / ZoneBlockedError
         announce.no_package(e)  # announcement 2 (see announce.py)
         raise
-    announce.package_detected(box_name)  # announcement 2 (see announce.py)
+    announce.package_detected(box_name, recheck=not move)  # announcement 2 (see announce.py)
     return box_center
 
 
