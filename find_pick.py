@@ -3,7 +3,7 @@
 find_box() takes a live photo from overview-blue and finds the box anywhere in the blue zone.
 If the zone is blocked or there's no box, it raises an error instead of guessing.
 
-Every motion asks for confirmation unless --yes is passed. Keep someone at the e-stop.
+Motion prompts are off by default; pass --confirm to ask before each motion. Keep someone at the e-stop.
 `find` also saves and opens captures/detection.jpg: pink = blue zone, yellow = box, red cross = center.
 
 Usage:
@@ -61,8 +61,7 @@ PRESS_MM = 10.0     # press 10 mm past the top surface
 LIFT_MM = 80.0      # how far to lift after grabbing
 GRIP_SETTLE_S = 2.0 # wait after suction on before lifting
 
-ASK_BEFORE_MOVING = True
-
+ASK_BEFORE_MOVING = False
 
 def confirm(what: str) -> None:
     if ASK_BEFORE_MOVING and input(f"\nAbout to {what}. Press Enter to go, anything else to abort: ").strip():
@@ -193,7 +192,6 @@ async def pick_box(machine: RobotClient, box_center: Pose) -> None:
     boxes on Oct 16 17:48/17:49: press PRESS_MM (10) into the top, wait 2 s, one straight lift.
     The wrist-camera grip check (grip_check.py) is logged only; it never changes the motion."""
     gripper = Gripper.from_robot(machine, GRIPPER)
-    confirm("open the vacuum gripper (turn suction OFF)")
     await gripper.open()
     await move_tip(machine, tip_target(box_center, APPROACH_MM), "approach above the box")
     await move_tip(machine, tip_target(box_center, -PRESS_MM), "lower onto the box top", straight_line=True)
@@ -241,11 +239,11 @@ async def main():
     global ASK_BEFORE_MOVING
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("action", choices=["find", "plan", "hover", "pick", "release"])
-    parser.add_argument("--yes", action="store_true", help="don't ask before each motion")
+    parser.add_argument("--confirm", action="store_true", help="ask before each robot motion")
     parser.add_argument("--no-move", action="store_true", help="find: don't move to overview-blue first")
     parser.add_argument("--image", help="find: use a saved photo from overview-blue (+ its .npy depth), no robot")
     args = parser.parse_args()
-    ASK_BEFORE_MOVING = not args.yes
+    ASK_BEFORE_MOVING = args.confirm
 
     if args.action == "plan":
         print_plan()

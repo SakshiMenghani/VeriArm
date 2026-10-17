@@ -4,7 +4,7 @@ The drop point comes from the scan result (result["drop_center_pose"], see zones
 box goes, z = top of the box once it rests there. Same convention as box_center, so the tip heights
 use find_pick.tip_target and the same 17 mm suction correction as pick_box.
 
-  python place.py --test-pick --yes   MOVES THE ARM: find the box, pick it, lift 3 cm, put it back, release
+  python place.py --test-pick         MOVES THE ARM: find the box, pick it, lift 3 cm, put it back, release
                                       (checks the suction + the holding sensor before any carrying)
 In main.py:  await place_box(machine, result["accepted"], result["drop_center_pose"])
 """
@@ -108,9 +108,9 @@ async def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--test-pick", action="store_true")
     p.add_argument("--test-lift", action="store_true", help="lift 2 cm ignoring the holding sensor, put back")
-    p.add_argument("--yes", action="store_true", help="don't ask before each motion")
+    p.add_argument("--confirm", action="store_true", help="ask before each robot motion")
     args = p.parse_args()
-    find_pick.ASK_BEFORE_MOVING = not args.yes
+    find_pick.ASK_BEFORE_MOVING = args.confirm
     if not (args.test_pick or args.test_lift):
         p.print_help()
         return

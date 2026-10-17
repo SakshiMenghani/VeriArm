@@ -60,7 +60,7 @@ Measured on Oct 16 with the real box: top and three sides are reachable at the f
 - Labels & inventory: `inventory.py` (database + `verify`), `make_labels.py` (printable labels), `label_api.py` (live QR API). See below.
 - `scan.py`: `scan(machine)` = find → inspect → verify; returns the handoff result for pick/place (see "Scan result" below).
 - Bottom fallback / wall side: `inspection.py --turn` picks the box (`pick_box`), turns it 180° and re-reads. Untested.
-- **Test:** `python inspection.py --decode <image>` / `--plan` (no motion), then `python scan.py --yes`.
+- **Test:** `python inspection.py --decode <image>` / `--plan` (no motion), then `python scan.py`.
 
 ### Yixin — pick, sort the box, and notify
 - `pick_box(machine, box_center)`: work out the grip point, lower onto the top, turn on suction, lift. Starting point: the untested draft in `find_pick.py`. Inputs: `box_center` (x, y = box center; **z = top of the box**, so aim the suction cup at `box_center.z` directly), tip 17 mm lower than the config thinks, move the tip with the motion service (gripper as the component).
@@ -69,7 +69,7 @@ Measured on Oct 16 with the real box: top and three sides are reachable at the f
 - **Test:** jog the arm, pick a box with a manual suction command, test both drops and the notification.
 
 ### Control panel (Sakshi)
-- `python ui.py` → http://localhost:8080 (`--host 0.0.0.0` to open it from another laptop). **Start: one box** = `main.py --yes`, **until blue zone is empty** = `--loop`, **Scan only** = `--dry-run`. Shows the steps (find → read label → verify → pick → place → done), the live log, the latest result (green/orange card, package, recipient, reason, face photos) and the history from `inventory.db`.
+- `python ui.py` → http://localhost:8080 (`--host 0.0.0.0` to open it from another laptop). **Start: one box** = `main.py`, **until blue zone is empty** = `--loop`, **Scan only** = `--dry-run`. Shows the steps (find → read label → verify → pick → place → done), the live log, the latest result (green/orange card, package, recipient, reason, face photos) and the history from `inventory.db`.
 - **Stop** ends the run and sends `arm.stop()`. It does not turn the suction off (a carried box isn't dropped). The physical e-stop is still the real safety.
 
 ### main.py (Sakshi)
@@ -78,7 +78,7 @@ Measured on Oct 16 with the real box: top and three sides are reachable at the f
 - Connects once, then: `scan(machine)` → re-check the box position with `find_box(machine, move=False)` (the arm is back at overview after the scan) → `pick_box(machine, box_center)` → `place_box(machine, result["accepted"])` → `notify_done(result)`. `--loop` repeats until the blue zone is empty.
 - **Yixin: put `place_box(machine, verified)` and `notify_done(result)` in `place.py`.** `main.py` imports them from there automatically. Until `place.py` exists, `main.py` scans and stops **before** picking (the arm never holds a box with nowhere to put it); `notify_done` falls back to printing `result["say"]`.
 - If the gripper isn't holding the box after `pick_box`, it releases suction, goes back to overview and stops.
-- `python main.py --dry-run` (scan only), `python main.py --yes` (one box), `python main.py --yes --loop`.
+- `python main.py --dry-run` (scan only), `python main.py` (one box), `python main.py --loop`.
 
 ## Labels & inventory
 

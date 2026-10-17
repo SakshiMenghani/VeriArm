@@ -1,9 +1,8 @@
 """VeriArm main loop: scan the box in the blue zone, pick it, place it in green/orange, announce.
 
   python main.py --dry-run     MOVES THE ARM (no pick): find + read label + verify, print where it would go
-  python main.py               one box; asks before each pick/place motion
-  python main.py --yes         one box, no questions (someone at the e-stop!)
-  python main.py --yes --loop  keep going until the blue zone is empty (max --max boxes)
+  python main.py               one box, no motion prompts (someone at the e-stop!)
+  python main.py --loop       keep going until the blue zone is empty (max --max boxes)
 
 Pieces (connect once here, pass `machine` to everyone):
   scan(machine)                       Sakshi  scan.py      -> result dict (see PLAN.md "Scan result"):
@@ -89,12 +88,12 @@ async def handle_one_box(machine: RobotClient, dry_run: bool) -> dict | None:
 
 async def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--yes", action="store_true", help="don't ask before each motion")
+    p.add_argument("--confirm", action="store_true", help="ask before each robot motion")
     p.add_argument("--dry-run", action="store_true", help="scan + verify only, never pick")
     p.add_argument("--loop", action="store_true", help="repeat until the blue zone is empty")
     p.add_argument("--max", type=int, default=10, help="max boxes in --loop mode")
     args = p.parse_args()
-    find_pick.ASK_BEFORE_MOVING = not args.yes
+    find_pick.ASK_BEFORE_MOVING = args.confirm
 
     done = []
     async with await connect() as machine:

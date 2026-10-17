@@ -15,9 +15,9 @@ What it does:
   Optional (--turn): if no label and a side couldn't be seen, pick the box, turn it 180 deg, re-check.
 
   python inspection.py --plan              detect the box (arm must be at overview-blue), print views, no motion
-  python inspection.py --yes               MOVES THE ARM: photograph + read all 5 faces
-  python inspection.py --yes --turn        ... and turn the box if a side couldn't be seen
-  python inspection.py --yes --faces +x    only these faces (top, -x, +x, -y, +y)
+  python inspection.py                     MOVES THE ARM: photograph + read all 5 faces
+  python inspection.py --turn              ... and turn the box if a side couldn't be seen
+  python inspection.py --faces +x          only these faces (top, -x, +x, -y, +y)
   python inspection.py --decode FILE...    try QR decoding on saved images, no robot
 """
 import argparse
@@ -365,13 +365,13 @@ async def inspect_box(machine: RobotClient, box_center: Pose, allow_turn: bool =
 async def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--plan", action="store_true", help="detect + print planned views, no motion")
-    p.add_argument("--yes", action="store_true", help="don't ask before moves (Sandy's confirm prompts)")
+    p.add_argument("--confirm", action="store_true", help="ask before each robot motion")
     p.add_argument("--turn", action="store_true", help="pick up + turn the box if a side couldn't be seen")
     p.add_argument("--faces", nargs="+", metavar="FACE", help="only these: top -x +x -y +y")
     p.add_argument("--decode", nargs="+", metavar="FILE")
     args = p.parse_args()
     only = None if not args.faces else {f if f == "top" else f"{f} side" for f in args.faces}
-    find_pick.ASK_BEFORE_MOVING = not args.yes
+    find_pick.ASK_BEFORE_MOVING = args.confirm
 
     if args.decode:
         for f in args.decode:

@@ -3,7 +3,7 @@ This is the handoff to pick/place: the result says which zone the box goes to an
 
 Status flow: DETECTED (box found in blue zone) -> ACCEPTED (green zone) or REJECTED (orange zone).
 
-  python scan.py --yes      MOVES THE ARM: find_box -> inspect 5 faces -> verify; prints + saves the result
+  python scan.py            MOVES THE ARM: find_box -> inspect 5 faces -> verify; prints + saves the result
 
 In main.py (connect once, pass machine):
     result = await scan(machine)                    # dict, also saved to runs/last_result.json
@@ -98,8 +98,9 @@ async def scan(machine: RobotClient) -> dict | None:
 
 async def main():
     p = argparse.ArgumentParser()
-    p.add_argument("--yes", action="store_true", help="don't ask before each move")
-    find_pick.ASK_BEFORE_MOVING = not p.parse_args().yes
+    p.add_argument("--confirm", action="store_true", help="ask before each robot motion")
+    args = p.parse_args()
+    find_pick.ASK_BEFORE_MOVING = args.confirm
     async with await connect() as machine:
         result = await scan(machine)
     if result is None:
