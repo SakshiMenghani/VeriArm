@@ -1,20 +1,26 @@
-"""VeriArm checkout: the sorting flow as a voice conversation (paid / unpaid packages).
+"""VeriArm checkout: a voice conversation at the blue zone (the checkout counter), then one move.
 
-Per package:  scan (find -> read label -> check inventory)
-  PAID:    "This package is paid."  -> pick -> green zone
-  UNPAID:  "...hasn't been paid yet." -> "Which shipping option?" -> "Please tap your card on the purple area,
-           then say done." -> "Payment accepted." -> pick -> orange zone
-  then:    "Would you like the notification sent to your email?" -> "Sending it to <email>."
-           "Would you like to place another package?" -> next package, or "Thanks, goodbye!"
+Per package, at the blue zone:
+  scan (find -> read label -> check inventory)
+  UNIDENTIFIED (no / unreadable / non-VeriArm label, not in the inventory, recalled):
+           "I can't identify this package. Please generate a shipping label first, ..." -> stays, no move
+  PAID     (ORDERS says so, with its shipping):  "This package is paid, with Standard shipping."
+  UNPAID   "Standard for 5 dollars, or Express for 12?" -> "tap your card on the purple area, then say done"
+           -> "Payment accepted."   (cancelled -> "This package stays here until it's paid." -> no move)
+  "Would you like the notification sent to your email?" -> "Sending it to <email>."
+then:   pick -> Standard -> green zone, Express -> orange zone
+        "Would you like to place another package?" -> next package, or "Thanks, goodbye!"
 
-Quick version: paid = the package matches the inventory (scan's "accepted"). Stage 1: the email is only
-announced (sending comes in stage 2) and the card tap is confirmed by saying "done" (camera check: stage 3).
+Paid status and shipping are hardcoded in ORDERS for the demo (to move into the inventory database).
+Stage 1: the email is only announced (sending: stage 2); the card tap is confirmed by saying "done"
+(camera check: stage 3).
 
-  python checkout.py                      full conversation with the robot (asks before each motion)
-  python checkout.py --yes                ... without the motion prompts
-  python checkout.py --no-pick            talk + scan, but never pick up the box
-  python checkout.py --simulate unpaid    no robot at all: test the conversation (paid or unpaid)
-  python checkout.py --type ...           type your answers instead of speaking them
+  python checkout.py                       full conversation with the robot (asks before each motion)
+  python checkout.py --yes                 ... without the motion prompts
+  python checkout.py --no-pick             talk + scan, but never pick up the box
+  python checkout.py --simulate PKG-003    no robot: test the conversation for this package
+                                           (PKG-001 paid, PKG-003 unpaid, PKG-006 recalled, NONE no label)
+  python checkout.py --type ...            type your answers instead of speaking them
 
 Email address: VERIARM_NOTIFY_EMAIL in .env.
 """
@@ -26,13 +32,20 @@ import announce
 from understand import understand
 from voice_input import ask
 
-SHIPPING = {  # pre-determined options: key -> (name, delivery time, price in dollars)
-    "standard": ("Standard", "3 to 5 days", 5),
-    "express": ("Express", "1 to 2 days", 12),
-    "overnight": ("Overnight", "next day", 25),
+# Hardcoded for the demo, until the inventory database has paid / shipping columns.
+# Known packages that aren't listed here pay at checkout.
+ORDERS = {
+    "PKG-001": {"paid": True, "shipping": "standard"},
+    "PKG-003": {"paid": False},
 }
-YES_NO = {"yes": "yes / agree / please do", "no": "no / decline / not now"}
+SHIPPING = {  # key -> (name, delivery time, price in dollars, zone)
+    "standard": ("Standard", "3 to 5 days", 5, "green"),
+    "express": ("Express", "1 to 2 days", 12, "orange"),
+}
+YES_NO = {"yes": "yes / agree / please do", "no": "no / decline / not now / no thanks"}
+READY = {"ready": "the package is placed / ready / go", "stop": "they want to stop / finish"}
 MAX_TRIES = 2
+SIMULATED_INVENTORY = {"PKG-001", "PKG-002", "PKG-003", "PKG-004", "PKG-005"}  # --simulate only (PKG-006 recalled)
 
 
 def choose(question: str, choices: dict[str, str], typed: bool, retry: str | None = None) -> str | None:
@@ -57,26 +70,27 @@ def spoken_email(email: str) -> str:
     return email.replace("@", " at ").replace(".", " dot ")
 
 
-def take_payment(typed: bool) -> bool:
-    """Shipping choice + (simulated) card tap. True if paid."""
-    options = ", ".join(f"{n} for {p} dollars" for n, _, p in list(SHIPPING.values())[:-1])
-    last = list(SHIPPING.values())[-1]
-    ship = choose(f"Which shipping option would you like? {options}, or {last[0]} for {last[2]} dollars.",
-                  {k: f"{n} shipping, {t}, ${p}" for k, (n, t, p) in SHIPPING.items()}, typed)
+def take_payment(typed: bool) -> str | None:
+    """Shipping choice + (simulated) card tap. Returns the shipping key, or None if not paid."""
+    (s_name, _, s_price, _), (e_name, _, e_price, _) = SHIPPING["standard"], SHIPPING["express"]
+    ship = choose(f"This package hasn't been paid yet. Which shipping would you like? "
+                  f"{s_name} for {s_price} dollars, or {e_name} for {e_price} dollars.",
+                  {k: f"{n} shipping, {t}, ${p}" for k, (n, t, p, _) in SHIPPING.items()}, typed,
+                  retry=f"Sorry, I didn't catch that. {s_name} for {s_price} dollars, or {e_name} for {e_price}?")
     if ship is None:
-        announce.speak("No problem. I'll set this package aside until it's paid.")
-        return False
-    name, days, price = SHIPPING[ship]
+        announce.speak("This package stays here until it's paid.")
+        return None
+    name, days, price, _ = SHIPPING[ship]
     tapped = choose(f"{name} shipping, {days}, {price} dollars. Please tap your card on the purple area, "
                     "then say done.",
                     {"done": "they tapped the card / done / finished / paid",
                      "cancel": "they don't want to pay / cancel / stop"},
                     typed, retry="Please tap your card on the purple area, then say done.")
     if tapped != "done":
-        announce.speak("Okay, payment cancelled. I'll set this package aside.")
-        return False
+        announce.speak("Okay, payment cancelled. This package stays here until it's paid.")
+        return None
     announce.speak("Payment accepted.")
-    return True
+    return ship
 
 
 def offer_notification(typed: bool) -> None:
@@ -89,11 +103,14 @@ def offer_notification(typed: bool) -> None:
         announce.speak("I don't have an email address set up yet.")
 
 
-async def pick_and_place(machine, result: dict) -> bool:
-    """Same as main.py's pick part: re-check the position, pick, place in the result's zone."""
+async def move_to_shipping_area(machine, result: dict, shipping: str) -> bool:
+    """Re-check the position, pick, place in the shipping area's zone (Standard = green, Express = orange)."""
     import find_pick
+    from detect import TABLE_TOP_Z
     from inventory import mark_placed
     from place import place_box
+    from zones import drop_center
+    zone = SHIPPING[shipping][3]
     try:
         box_center = await find_pick.find_box(machine, move=False)  # re-check: the box may have been nudged
     except (LookupError, RuntimeError) as e:
@@ -106,45 +123,68 @@ async def pick_and_place(machine, result: dict) -> bool:
         print(f"[checkout] pick failed: {e}")
         announce.speak("I couldn't pick up the package.")
         return False
-    await place_box(machine, result["accepted"], result["drop_center_pose"])
+    drop = drop_center(zone, box_center.z - TABLE_TOP_Z)
+    await place_box(machine, zone == "green", drop)  # says "Moving the package to the ... shipping area."
     mark_placed(result["result_id"])
     return True
+
+
+def simulated_result(package: str) -> dict:
+    """A scan result without the robot, for --simulate."""
+    pid = None if package.upper() == "NONE" else package.upper()
+    announce.package_detected("large")
+    announce.label_read(f"VA1|{pid}|Test Person" if pid else None)
+    return {"accepted": pid in SIMULATED_INVENTORY, "package_id": pid,
+            "reason": "Matches inventory" if pid in SIMULATED_INVENTORY else "Not expected"}
 
 
 async def handle_package(machine, args) -> bool:
     """One package. Returns False if there was no package to handle."""
     if args.simulate:
-        result = {"accepted": args.simulate == "paid", "package_id": "PKG-001"}
-        announce.package_detected("large")
-        announce.label_read(f"VA1|{result['package_id']}|Test Person")
-        announce.verification(result["accepted"])
+        result = simulated_result(args.simulate)
     else:
         from scan import scan
-        result = await scan(machine)  # announces: detected, label read, paid / not paid
+        result = await scan(machine)  # announces: detected, label read
         if result is None:
             return False
 
-    paid = result["accepted"]
-    if not paid:
-        paid = take_payment(args.type)  # quick version: unpaid boxes still go to orange
+    if not result["accepted"]:  # no / unreadable / non-VeriArm label, not in inventory, recalled
+        print(f"[checkout] unidentified: {result.get('reason')}")
+        announce.speak("I can't identify this package. Please generate a shipping label first, "
+                       "then place it in the checkout area.")
+        return True
 
-    if not args.simulate and not args.no_pick:
-        await pick_and_place(machine, result)
-    elif args.simulate:
-        announce.moving_to("green" if result["accepted"] else "orange")
+    order = ORDERS.get(result["package_id"], {"paid": False})
+    if order["paid"]:
+        shipping = order["shipping"]
+        announce.speak(f"This package is paid, with {SHIPPING[shipping][0]} shipping.")
+    else:
+        shipping = take_payment(args.type)
+        if shipping is None:
+            return True  # not paid: the box stays at the counter
 
-    if paid:
-        offer_notification(args.type)
+    offer_notification(args.type)  # at the counter, before the box moves
+
+    if args.simulate:
+        announce.moving_to(SHIPPING[shipping][3])
+    elif not args.no_pick:
+        await move_to_shipping_area(machine, result, shipping)
     return True
 
 
 FIXED_LINES = [  # generated in the background at start, so they play without delay (ElevenLabs voice)
     "Hello, this is VeriArm. I'll be here to help you sort packages whenever you are ready.",
-    "This package is paid.", "This package hasn't been paid yet.", "Payment accepted.",
+    "Package detected: the large box.", "Package detected: the tall box.",
+    "This package is paid, with Standard shipping.", "This package is paid, with Express shipping.",
+    "This package hasn't been paid yet. Which shipping would you like? Standard for 5 dollars, "
+    "or Express for 12 dollars.",
+    "Standard shipping, 3 to 5 days, 5 dollars. Please tap your card on the purple area, then say done.",
+    "Express shipping, 1 to 2 days, 12 dollars. Please tap your card on the purple area, then say done.",
+    "Payment accepted.", "This package stays here until it's paid.",
+    "I can't identify this package. Please generate a shipping label first, then place it in the checkout area.",
     "Would you like the notification sent to your email?", "Would you like to place another package?",
     "Great. Place it in the blue zone, then say ready.", "Thanks, goodbye!",
-    "Package detected: the large box.", "Moving the package to the green area.",
-    "Moving the package to the orange area.",
+    "Moving the package to the Standard shipping area.", "Moving the package to the Express shipping area.",
 ]
 
 
@@ -157,15 +197,12 @@ async def conversation(machine, args) -> None:
     while True:
         if not await handle_package(machine, args):
             if choose("I don't see a package in the blue zone. Please place one, then say ready.",
-                      {"ready": "the package is placed / ready / go", "stop": "they want to stop"},
-                      args.type) != "ready":
+                      READY, args.type) != "ready":
                 break
             continue
-        if choose("Would you like to place another package?", YES_NO, args.type) != "yes":
+        if args.simulate or choose("Would you like to place another package?", YES_NO, args.type) != "yes":
             break
-        if choose("Great. Place it in the blue zone, then say ready.",
-                  {"ready": "the package is placed / ready / go", "stop": "they want to stop"},
-                  args.type) != "ready":
+        if choose("Great. Place it in the blue zone, then say ready.", READY, args.type) != "ready":
             break
     announce.speak("Thanks, goodbye!", wait=True)
 
@@ -174,10 +211,10 @@ async def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--yes", action="store_true", help="don't ask before each motion")
     p.add_argument("--no-pick", action="store_true", help="scan and talk, but never pick the box up")
-    p.add_argument("--simulate", choices=["paid", "unpaid"], help="no robot: test the conversation")
+    p.add_argument("--simulate", metavar="PACKAGE", help="no robot: PKG-001, PKG-003, PKG-006, NONE ...")
     p.add_argument("--type", action="store_true", help="type answers instead of speaking them")
     args = p.parse_args()
-    announce.WORDING = "payment"
+    announce.WORDING = "checkout"
 
     if args.simulate:
         await conversation(None, args)

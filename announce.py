@@ -13,6 +13,7 @@ To change wording, edit the functions below; to move or remove an announcement, 
                                     no_package(error)            find_pick.py find_box(), no box / zone blocked
   3  QR code read (or not)          label_read(label_text)       scan.py      scan(), right after inspect_box()
   4  checked against the inventory  verification(accepted, why)  scan.py      scan(), right after verify()
+                                    (silent in checkout.py, which says paid / unpaid / unidentified itself)
   5  box starts moving to its zone  moving_to(zone)              place.py     place_box(), before carrying the box
 
 Command line (for testing):
@@ -81,24 +82,24 @@ def label_read(label_text: str | None) -> None:
         speak("I read a label, but it isn't a VeriArm label.")
 
 
-# Wording for announcements 4 and 5. "verified" = the sorting demo (main.py); "payment" = the checkout
-# conversation (checkout.py sets it), where an accepted package counts as paid (quick version: matches
-# inventory = paid; a proper paid column in the inventory comes later).
+# Wording for announcements 4 and 5. "verified" = the sorting demo (main.py); "checkout" = the checkout
+# conversation (checkout.py sets it): it says paid / unpaid / unidentified itself, and the zones are the
+# shipping areas (green = Standard, orange = Express).
 WORDING = "verified"
+SHIPPING_AREA = {"green": "Standard", "orange": "Express"}
 
 
 def verification(accepted: bool, reason: str = "") -> None:
-    """4. scan.scan(): right after verify()."""
-    if WORDING == "payment":
-        speak("This package is paid." if accepted else "This package hasn't been paid yet.")
-    else:
-        speak("Package verified." if accepted else f"Package not verified. {reason}.".replace("..", "."))
+    """4. scan.scan(): right after verify(). Silent in the checkout (checkout.py says paid / unpaid itself)."""
+    if WORDING == "checkout":
+        return
+    speak("Package verified." if accepted else f"Package not verified. {reason}.".replace("..", "."))
 
 
 def moving_to(zone: str) -> None:
     """5. place.place_box(): right before carrying the box. zone is "green" or "orange"."""
-    if WORDING == "payment":
-        speak(f"Moving the package to the {zone} area.")
+    if WORDING == "checkout":
+        speak(f"Moving the package to the {SHIPPING_AREA[zone]} shipping area.")
     else:
         area = "accepted" if zone == "green" else "rejected"
         speak(f"Moving the package to the {area} area.")
