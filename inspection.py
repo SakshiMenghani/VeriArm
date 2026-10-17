@@ -48,7 +48,7 @@ from robot import ARM, CAMERA, GRIPPER, MOTION, connect
 RUNS = Path(__file__).parent / "runs"
 LAST_INSPECTION = RUNS / "last_inspection.json"
 
-TOP_STANDOFF = 250  # mm camera -> top face
+TOP_STANDOFF = 270  # mm camera -> top face; 20 mm higher overhead clearance
 # (camera elevation above horizontal in degrees, distance from face center in mm), tried in order.
 # Higher elevation raises the camera while it looks down at the face. +x uses the fixed calibrated pose below.
 SIDE_VIEWS = ((30, 260), (40, 250), (55, 220), (65, 190), (65, 240), (75, 230), (75, 170))
