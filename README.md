@@ -111,8 +111,8 @@ SMTP_USER=sender@example.com
 SMTP_PASSWORD=...
 ```
 
-Optional: `SMTP_HOST` / `SMTP_PORT` (default `smtp.gmail.com:587`), `SMTP_FROM`, `ELEVENLABS_VOICE_ID`, and
-`VERIARM_NOTIFY_EMAIL` as a fallback address.
+Optional: `SMTP_HOST` / `SMTP_PORT` (default `smtp.gmail.com:587`), `SMTP_FROM` and `ELEVENLABS_VOICE_ID`.
+Each package's notification address comes from the inventory; for a package without one, VeriArm asks for it by voice.
 
 ## Running it
 

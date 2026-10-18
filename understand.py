@@ -34,10 +34,37 @@ def _keyword_fallback(choices: dict[str, str], answer: str) -> str:
     return hits[0] if len(hits) == 1 else "unclear"
 
 
+QUICK_WORDS = {  # short answers that can only mean one choice: no need to ask Claude (saves 1.5-3.5 s)
+    "yes": {"yes", "yeah", "yep", "yup", "sure", "ok", "okay", "please", "correct", "right", "absolutely",
+            "definitely", "of course", "that's right", "that's correct", "yes please", "sure thing", "go ahead"},
+    "no": {"no", "nope", "nah", "no thanks", "no thank you", "not now", "no, thank you", "no it's not",
+           "that's wrong", "wrong", "incorrect"},
+    "done": {"done", "i'm done", "finished", "paid", "tapped", "ok done", "okay done"},
+    "cancel": {"cancel", "stop", "never mind"},
+    "standard": {"standard", "standard shipping", "the standard one", "standard please"},
+    "express": {"express", "express shipping", "the express one", "express please"},
+}
+
+
+def _quick_match(choices: dict[str, str], answer: str) -> str | None:
+    """The choice for an obvious short answer ("Yes.", "no thanks", "Express"), else None (ask Claude)."""
+    a = " ".join(re.sub(r"[^\w\s']", " ", answer.lower()).split())
+    hits = [k for k in choices if a in QUICK_WORDS.get(k, set()) | {k}]
+    if len(hits) == 1:
+        return hits[0]
+    # A distinctive choice word said once amid background talk ("... Express ... circuits into worlds") counts.
+    # Not for yes / no: those words turn up in any nearby conversation.
+    words = a.split()
+    found = [k for k in choices if k not in ("yes", "no") and words.count(k) == 1]
+    return found[0] if len(found) == 1 else None
+
+
 def understand(question: str, choices: dict[str, str], answer: str) -> str:
     """Which of `choices` (key -> description) the answer means, or "unclear"."""
     if not answer.strip():
         return "unclear"
+    if (quick := _quick_match(choices, answer)) is not None:
+        return quick
     try:
         import anthropic
 

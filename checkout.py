@@ -5,7 +5,7 @@ Per package, at the blue zone:
   UNIDENTIFIED (no / unreadable / non-VeriArm label, not in the inventory, wrong recipient name):
            "I can't identify this package. Please generate a shipping label first, ..." -> stays, no move
   PAID     (inventory says so, with its shipping):  "This package is paid, with Standard shipping."
-  UNPAID   "Standard for 5 dollars, or Express for 12?" -> "tap your card on the purple area, then say done"
+  UNPAID   "Standard for 5 dollars, or Express for 12?" -> "tap your card on the payment area, then say done"
            -> "Payment accepted."   (cancelled -> "This package stays here until it's paid." -> no move)
   "Would you like the notification sent to your email?" -> "Sending it to <email>."
 then:   pick -> Standard -> green zone, Express -> orange zone
@@ -26,7 +26,8 @@ checkout marks the package PAID there. The email is sent by notify.py (SMTP sett
 
 main.py runs this conversation by default (python main.py --classic = the old verified / rejected sorting).
 
-Email address: VERIARM_NOTIFY_EMAIL in .env.
+Email address: the package's sender_email in the inventory database (inventory_seed.csv; a package
+without one gets asked for an email by voice, which is then saved to the database).
 """
 import argparse
 import asyncio
@@ -56,12 +57,6 @@ def choose(question: str, choices: dict[str, str], typed: bool, retry: str | Non
     return None
 
 
-def notify_email() -> str:
-    from robot import _load_env
-    _load_env()
-    return os.environ.get("VERIARM_NOTIFY_EMAIL", "").strip()
-
-
 def spoken_email(email: str) -> str:
     """'a.b@gmail.com' -> 'a dot b at gmail dot com', so the voice reads it clearly."""
     return email.replace("@", " at ").replace(".", " dot ")
@@ -78,11 +73,11 @@ def take_payment(typed: bool) -> str | None:
         announce.speak("This package stays here until it's paid.")
         return None
     name, days, price, _ = SHIPPING[ship]
-    tapped = choose(f"{name} shipping, {days}, {price} dollars. Please tap your card on the purple area, "
+    tapped = choose(f"{name} shipping, {days}, {price} dollars. Please tap your card on the payment area, "
                     "then say done.",
                     {"done": "they tapped the card / done / finished / paid",
                      "cancel": "they don't want to pay / cancel / stop"},
-                    typed, retry="Please tap your card on the purple area, then say done.")
+                    typed, retry="Please tap your card on the payment area, then say done.")
     if tapped != "done":
         announce.speak("Okay, payment cancelled. This package stays here until it's paid.")
         return None
@@ -112,11 +107,16 @@ def ask_new_email(typed: bool) -> str | None:
 
 def offer_notification(typed: bool, result: dict, shipping: str, paid_now: bool = False,
                        simulate: bool = False) -> None:
-    """Email the package's sender_email (inventory; falls back to VERIARM_NOTIFY_EMAIL in .env) via notify.py.
+    """Email the package's sender_email from the inventory (asks for one by voice if it has none) via notify.py.
     simulate: say it, but don't send."""
-    if choose("Would you like the notification sent to your email?", YES_NO, typed) != "yes":
+    answer = choose("Would you like the notification sent to your email?", YES_NO, typed)
+    if answer == "no":
+        announce.speak("Okay, no notification.")
         return
-    email = result.get("sender_email") or notify_email()
+    if answer != "yes":  # unclear twice: don't send, and say so
+        announce.speak("Okay, I'll skip the notification.")
+        return
+    email = result.get("sender_email")  # only from the inventory database
     if not email:
         email = ask_new_email(typed)
         if not email:
@@ -275,8 +275,9 @@ FIXED_LINES = [  # generated in the background at start, so they play without de
     "This package is paid, with Standard shipping.", "This package is paid, with Express shipping.",
     "This package hasn't been paid yet. Which shipping would you like? Standard for 5 dollars, "
     "or Express for 12 dollars.",
-    "Standard shipping, 3 to 5 days, 5 dollars. Please tap your card on the purple area, then say done.",
-    "Express shipping, 1 to 2 days, 12 dollars. Please tap your card on the purple area, then say done.",
+    "Standard shipping, 3 to 5 days, 5 dollars. Please tap your card on the payment area, then say done.",
+    "Express shipping, 1 to 2 days, 12 dollars. Please tap your card on the payment area, then say done.",
+    "Okay, no notification.", "Okay, I'll skip the notification.",
     "Payment accepted.", "This package stays here until it's paid.",
     "I can't identify this package. Please generate a shipping label first, then place it in the checkout area.",
     "Would you like the notification sent to your email?", "Do you have another package to send?",
@@ -289,8 +290,21 @@ FIXED_LINES = [  # generated in the background at start, so they play without de
 ]
 
 
+def package_lines() -> list[str]:
+    """Per-package sentences (label read, email) from the inventory, generated at start like FIXED_LINES,
+    so they don't take ~1.5 s of ElevenLabs time in the middle of the conversation."""
+    from inventory import all_items, connect_db
+    db = connect_db()
+    try:
+        items = all_items(db)
+    finally:
+        db.close()
+    lines = [f"Label read: package {announce.spell_id(r['id'])}, for {r['recipient']}." for r in items]
+    return lines + [f"Sending it to {spoken_email(r['sender_email'])}." for r in items if r["sender_email"]]
+
+
 async def conversation(machine, args) -> None:
-    announce.prepare(FIXED_LINES)
+    announce.prepare(FIXED_LINES + package_lines())
     if not args.type:
         import voice_input
         voice_input.calibrate()  # measure the room while it's quiet, before VeriArm starts talking
@@ -300,7 +314,7 @@ async def conversation(machine, args) -> None:
         if not await handle_package(machine, args):
             continue  # the box was gone by the time we scanned: wait for one again
         handled += 1
-        if args.simulate or args.once or (args.max and handled >= args.max):
+        if args.once or (args.max and handled >= args.max):  # --simulate asks too (yes: the same test package again)
             break
         more = choose("Do you have another package to send?", YES_NO, args.type)
         if more == "no":
