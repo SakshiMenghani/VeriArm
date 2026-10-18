@@ -158,14 +158,3 @@ leaves the suction on, so a carried box isn't dropped.
 
 The full script reference, the box finder's details and the Viam machine resources are in
 [docs/REFERENCE.md](docs/REFERENCE.md).
-
-## Team
-
-Built at the Viam hackathon by:
-
-- **Sandy Zhao** ([@SandyZhao18](https://github.com/SandyZhao18)): finding the box, the voice checkout conversation
-- **Yixin** ([@carolineli7199](https://github.com/carolineli7199)): picking, sorting and placing the box
-- **Sakshi Menghani** ([@SakshiMenghani](https://github.com/SakshiMenghani)): label inspection and verification, the
-  inventory with payments, shipping and email notifications, the control panel and the main loop
-
-This is a copy of the team repository, [carolineli7199/VeriArm](https://github.com/carolineli7199/VeriArm).
